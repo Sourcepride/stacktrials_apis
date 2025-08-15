@@ -1,0 +1,12 @@
+\set DB_NAME `echo "$DB_NAME"`
+\set DB_USER `echo "$DB_USER"`
+\set DB_PASSWORD `echo "$DB_PASSWORD"`
+CREATE USER :DB_USER WITH PASSWORD :'DB_PASSWORD';
+ALTER ROLE :DB_USER set client_encoding TO 'utf-8';
+ALTER ROLE :DB_USER set default_transaction_isolation TO 'read committed';
+ALTER ROLE :DB_USER set timezone TO 'UTC';
+CREATE DATABASE :DB_NAME;
+GRANT ALL PRIVILEGES ON DATABASE :DB_NAME TO :DB_USER;
+ALTER ROLE :DB_USER CREATEDB;
+\c :DB_NAME
+GRANT ALL ON SCHEMA public TO :DB_USER;
