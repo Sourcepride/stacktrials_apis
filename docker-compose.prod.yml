@@ -1,0 +1,17 @@
+version: "3.9"
+services:
+  api:
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/tmp
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes: [] # disable bind mounts in prod
+    command: >
+      sh -c "
+      ./wait-for-db.sh main_db:5432 --
+      gunicorn main:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8082
+      "

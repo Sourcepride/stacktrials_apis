@@ -1,0 +1,48 @@
+version: "3.9"
+services:
+  main_db:
+    image: postgres:16-alpine
+    env_file: .env
+    container_name: main_db
+    ports:
+      - "${POSTGRES_PORT}:5432"
+    volumes:
+      - ./psql_init.sql:/docker-entrypoint-initdb.d/psql_init.sql
+      - trails_pgdata:/var/lib/postgresql/data
+
+  redis_db:
+    image: redis:7-alpine
+    container_name: redis_db
+    env_file: .env
+    volumes:
+      - trails_redis:/data
+
+  rabbit_mq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: rabbit_mq
+    environment:
+      - HOSTNAME=www
+    hostname: www
+    volumes:
+      - rabbit_data:/var/lib/rabbitmq/mnesia/rabbit@www
+    env_file: .env
+  api:
+    image: fastapi-prod
+    build: .
+    ports:
+      - "8082:8082"
+    container_name: api
+    restart: unless-stopped
+    env_file: .env
+    command: >
+      sh -c "
+      ./wait-for-db.sh main_db:5432 -- 
+      uvicorn main:app --host 0.0.0.0 --port 8082 --reload
+      "
+    depends_on:
+      - main_db
+
+volumes:
+  trails_pgdata:
+  rabbit_data:
+  trails_redis:
