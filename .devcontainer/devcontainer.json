@@ -18,14 +18,23 @@
   "postCreateCommand": "pip install -r requirements.txt",
 
   // Features to add to the dev container. More info: https://containers.dev/features.
-  "features": {
-    "ghcr.io/devcontainers/features/python:1": {
-      "version": "3.11"
-    }
-  },
+  // "features": {
+  //   "ghcr.io/devcontainers/features/python:1": {
+  //     "version": "3.11"
+  //   }
+  // },
 
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
-  // "forwardPorts": [],
+  "forwardPorts": [8082, 5432, 6379, 15672],
+  "portsAttributes": {
+    "8082": {
+      "label": "FastAPI API",
+      "onAutoForward": "notify"
+    },
+    "15672": {
+      "label": "RabbitMQ Management"
+    }
+  },
 
   // Uncomment the next line if you want start specific services in your Docker Compose config.
   // "runServices": [],
@@ -41,12 +50,18 @@
       "extensions": [
         "ms-python.python",
         "ms-python.vscode-pylance",
-        "ms-toolsai.jupyter"
+        "ms-toolsai.jupyter",
+        "ms-python.black-formatter",
+        "humao.rest-client",
+        "ms-python.isort", // Import sorting
+        "ms-python.flake8" // linting
       ],
       "settings": {
         "python.defaultInterpreterPath": "/usr/local/bin/python",
         "python.analysis.typeCheckingMode": "basic",
-        "python.languageServer": "Pylance"
+        "python.languageServer": "Pylance",
+        "editor.formatOnSave": true,
+        "python.formatting.provider": "black"
       }
     }
   },
