@@ -98,3 +98,34 @@ class QuizAttemptStatus(str, Enum):
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+
+
+class ChatType(str, Enum):
+    DIRECT = "direct"
+    GROUP = "group"
+
+
+class GroupChatPrivacy(str, Enum):
+    PRIVATE = "private"
+    PUBLIC = "public"
+
+
+class MessageType(str, Enum):
+    TEXT = "text"
+    IMAGE = "image"
+    FILE = "file"
+    COURSE_REFERNCE = "reference"
+    SYSTEM = "system"  # For system messages like "User joined the chat"
+
+
+class MemberRole(str, Enum):
+    ADMIN = "admin"
+    MODERATOR = "moderator"
+    MEMBER = "member"
+
+
+class MemberStatus(str, Enum):
+    ACTIVE = "active"
+    LEFT = "left"
+    KICKED = "kicked"
+    BANNED = "banned"

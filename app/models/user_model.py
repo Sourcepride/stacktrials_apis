@@ -8,7 +8,8 @@ from sqlmodel import Field, Relationship
 from app.models.base import AppBaseModel
 
 if TYPE_CHECKING:
-    from .courses_model import Course, QuizAttempt
+    from .chat_model import Chat
+    from .courses_model import Course, CourseEnrollment, CourseProgress, QuizAttempt
     from .provider_model import Provider
 
 
@@ -38,6 +39,13 @@ class Account(AccountBase, table=True):
     quizes: list["QuizAttempt"] = Relationship(
         back_populates="account", passive_deletes="all"
     )
+    enrollment: list["CourseEnrollment"] = Relationship(
+        back_populates="account", passive_deletes="all"
+    )
+    progress_records: list["CourseProgress"] = Relationship(
+        back_populates="account", passive_deletes="all"
+    )
+    chats: list["Chat"] = Relationship(back_populates="account", passive_deletes="all")
 
 
 class ProfileBase(AppBaseModel):

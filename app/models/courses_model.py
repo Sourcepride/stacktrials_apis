@@ -1,10 +1,10 @@
 import uuid
-from datetime import datetime
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import JSON, Column, Field, Relationship, SQLModel
+from sqlmodel import Column, Field, Relationship, SQLModel
 
 from app.common.enum import (
     AttachmentType,
@@ -16,6 +16,7 @@ from app.common.enum import (
     ModuleProgressStatus,
     ModuleType,
     ProgressionType,
+    QuestionType,
     QuizAttemptStatus,
     ShowResults,
     VideoPlatform,
@@ -24,13 +25,8 @@ from app.common.enum import (
 from app.models.base import AppBaseModel
 
 if TYPE_CHECKING:
+    from .chat_model import Chat
     from .user_model import Account
-
-
-# Base model classes
-class TimestampMixin(SQLModel):
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
 
 
 # Core Models
@@ -68,10 +64,16 @@ class Course(CourseBase, table=True):
     # Relationships
     account_id: uuid.UUID = Field(foreign_key="account.id", ondelete="SET NULL")
     author: Optional["Account"] = Relationship(back_populates="courses")
-    sections: List["Section"] = Relationship(
+    sections: list["Section"] = Relationship(
         back_populates="course", passive_deletes="all"
     )
-    enrollments: List["CourseEnrollment"] = Relationship(back_populates="course")
+    enrollments: list["CourseEnrollment"] = Relationship(
+        back_populates="course", passive_deletes="all"
+    )
+    progress_records: list["CourseProgress"] = Relationship(
+        back_populates="course", passive_deletes="all"
+    )
+    chats: list["Chat"] = Relationship(back_populates="course", passive_deletes="all")
 
 
 class SectionBase(AppBaseModel):
@@ -97,7 +99,7 @@ class Section(SectionBase, table=True):
 
     # Relationships
     course: Course = Relationship(back_populates="sections")
-    modules: List["Module"] = Relationship(
+    modules: list["Module"] = Relationship(
         back_populates="section", passive_deletes="all"
     )
 
@@ -141,8 +143,8 @@ class Module(ModuleBase, table=True):
         back_populates="module",
         sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
     )
-    progress_records: List["ModuleProgress"] = Relationship(back_populates="module")
-    attachments: List["ModuleAttachment"] = Relationship(
+
+    attachments: list["ModuleAttachment"] = Relationship(
         back_populates="module", passive_deletes="all"
     )
 
@@ -228,10 +230,10 @@ class QuizContent(QuizContentBase, table=True):
 
     # Relationships
     module: Module = Relationship(back_populates="quiz_content")
-    questions: List["QuizQuestion"] = Relationship(
-        back_populates="quiz", cascade_delete=True
+    questions: list["QuizQuestion"] = Relationship(
+        back_populates="quiz", passive_deletes="all"
     )
-    attempts: List["QuizAttempt"] = Relationship(
+    attempts: list["QuizAttempt"] = Relationship(
         back_populates="quiz", passive_deletes="all"
     )
 
@@ -239,8 +241,8 @@ class QuizContent(QuizContentBase, table=True):
 class QuizQuestionBase(AppBaseModel):
     question_text: str
     question_type: QuestionType
-    options: Optional[Dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
-    correct_answer: Optional[Dict[str, Any]] = Field(
+    options: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
+    correct_answer: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )
     points: float = Field(default=1.0, ge=0)
@@ -248,65 +250,86 @@ class QuizQuestionBase(AppBaseModel):
     order_index: Optional[int] = None
 
 
-class QuizQuestion(SQLModel, table=True):
-
+class QuizQuestion(QuizQuestionBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    quiz_id: int = Field(foreign_key="quiz_content.id", index=True)
+    quiz_id: int = Field(foreign_key="quiz_content.id", index=True, ondelete="CASCADE")
 
     # Relationships
     quiz: QuizContent = Relationship(back_populates="questions")
 
 
-# Progress tracking models
-class CourseEnrollment(SQLModel, table=True):
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: int = Field(index=True)
-    course_id: int = Field(foreign_key="courses.id", index=True)
-    enrollment_date: datetime = Field(default_factory=datetime.utcnow)
+class CourseEnrollmentBase(SQLModel):
+    enrollment_date: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
+    )
     completion_date: Optional[datetime] = None
     status: EnrollmentStatus = Field(default=EnrollmentStatus.ACTIVE, index=True)
     progress_percentage: float = Field(default=0.0, ge=0, le=100)
-    last_accessed: datetime = Field(default_factory=datetime.utcnow)
+    last_accessed: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
+    )
+
+
+# Progress tracking models
+class CourseEnrollment(CourseEnrollmentBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
+    course_id: uuid.UUID = Field(
+        foreign_key="courses.id", index=True, ondelete="SET NULL"
+    )
 
     # Relationships
     course: Course = Relationship(back_populates="enrollments")
+    account: "Account" = Relationship(back_populates="enrollments")
 
     # Unique constraint
     class Config:
         schema_extra = {
-            "indexes": [{"fields": ["user_id", "course_id"], "unique": True}]
+            "indexes": [{"fields": ["account_id", "course_id"], "unique": True}]
         }
 
 
-class ModuleProgress(TimestampMixin, table=True):
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: int = Field(index=True)
-    module_id: int = Field(foreign_key="modules.id", index=True)
+class CourseProgressBase(AppBaseModel):
     status: ModuleProgressStatus = Field(
         default=ModuleProgressStatus.NOT_STARTED, index=True
     )
     start_time: Optional[datetime] = None
     completion_time: Optional[datetime] = None
     time_spent_seconds: int = Field(default=0, ge=0)
-    progress_data: Optional[Dict[str, Any]] = Field(
+    progress_data: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )
 
+    current_streak: int = Field(default=0)
+    longest_streak: int = Field(default=0)
+    last_active_date: Optional[datetime] = None
+
+
+class CourseProgress(CourseProgressBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
+    course_id: uuid.UUID = Field(
+        foreign_key="course.id", index=True, ondelete="SET NULL"
+    )
+
     # Relationships
-    module: Module = Relationship(back_populates="progress_records")
+    course: Course = Relationship(back_populates="progress_records")
+    account: "Account" = Relationship(back_populates="progress_records")
 
     # Unique constraint
     class Config:
         schema_extra = {
-            "indexes": [{"fields": ["user_id", "module_id"], "unique": True}]
+            "indexes": [{"fields": ["account_id", "course_id"], "unique": True}]
         }
 
 
 class QuizAttemptBase(SQLModel):
     attempt_number: int = Field(ge=1)
-    start_time: datetime = Field(default_factory=datetime.utcnow)
+    start_time: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     completion_time: Optional[datetime] = None
     score: Optional[float] = Field(default=None, ge=0, le=100)
     answers: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
@@ -316,7 +339,7 @@ class QuizAttemptBase(SQLModel):
 class QuizAttempt(QuizAttemptBase, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    user_id: int = Field(foreign_key="account.id", index=True, ondelete="CASCADE")
+    account_id: int = Field(foreign_key="account.id", index=True, ondelete="CASCADE")
     quiz_id: int = Field(foreign_key="quiz_content.id", index=True, ondelete="SET NULL")
 
     # Relationships
@@ -324,171 +347,4 @@ class QuizAttempt(QuizAttemptBase, table=True):
     account: "Account" = Relationship(back_populates="quizes")
 
 
-# Pydantic models for API responses (read models)
-class CourseRead(SQLModel):
-    id: int
-    title: str
-    slug: str
-    description: Optional[str]
-    short_description: Optional[str]
-    difficulty_level: DifficultyLevel
-    estimated_duration_hours: Optional[int]
-    status: CourseStatus
-    enrollment_type: EnrollmentType
-    certification_enabled: bool
-    created_at: datetime
-    updated_at: datetime
-
-
-class CourseWithSections(CourseRead):
-    sections: List["SectionRead"] = []
-
-
-class SectionRead(SQLModel):
-    id: int
-    title: str
-    description: Optional[str]
-    order_index: int
-    estimated_duration_minutes: Optional[int]
-    is_optional: bool
-    progression_type: ProgressionType
-
-
-class SectionWithModules(SectionRead):
-    modules: List["ModuleRead"] = []
-
-
-class ModuleRead(SQLModel):
-    id: int
-    title: str
-    description: Optional[str]
-    module_type: ModuleType
-    order_index: int
-    estimated_duration_minutes: Optional[int]
-    is_required: bool
-
-
-class VideoContentRead(SQLModel):
-    id: int
-    platform: VideoPlatform
-    external_video_id: str
-    video_url: str
-    thumbnail_url: Optional[str]
-    duration_seconds: Optional[int]
-    title: Optional[str]
-    embed_settings: Optional[Dict[str, Any]]
-
-
-class DocumentContentRead(SQLModel):
-    id: int
-    platform: DocumentPlatform
-    file_url: str
-    embed_url: Optional[str]
-    file_name: str
-    file_type: str
-    viewer_settings: Optional[Dict[str, Any]]
-
-
-class ModuleProgressRead(SQLModel):
-    id: int
-    user_id: int
-    module_id: int
-    status: ModuleProgressStatus
-    progress_percentage: float
-    time_spent_seconds: int
-    start_time: Optional[datetime]
-    completion_time: Optional[datetime]
-
-
-# Pydantic models for API requests (create/update models)
-class CourseCreate(SQLModel):
-    title: str
-    slug: str
-    description: Optional[str] = None
-    short_description: Optional[str] = None
-    learning_objectives: Optional[Dict[str, Any]] = None
-    prerequisites: Optional[Dict[str, Any]] = None
-    difficulty_level: DifficultyLevel = DifficultyLevel.BEGINNER
-    estimated_duration_hours: Optional[int] = None
-    language: str = "en"
-    enrollment_type: EnrollmentType = EnrollmentType.OPEN
-    certification_enabled: bool = False
-
-
-class CourseUpdate(SQLModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-    short_description: Optional[str] = None
-    learning_objectives: Optional[Dict[str, Any]] = None
-    prerequisites: Optional[Dict[str, Any]] = None
-    difficulty_level: Optional[DifficultyLevel] = None
-    estimated_duration_hours: Optional[int] = None
-    status: Optional[CourseStatus] = None
-    enrollment_type: Optional[EnrollmentType] = None
-    certification_enabled: Optional[bool] = None
-
-
-class SectionCreate(SQLModel):
-    title: str
-    description: Optional[str] = None
-    learning_objectives: Optional[Dict[str, Any]] = None
-    order_index: int
-    estimated_duration_minutes: Optional[int] = None
-    is_optional: bool = False
-    progression_type: ProgressionType = ProgressionType.SEQUENTIAL
-    completion_criteria: Optional[Dict[str, Any]] = None
-
-
-class ModuleCreate(SQLModel):
-    title: str
-    description: Optional[str] = None
-    module_type: ModuleType
-    order_index: int
-    estimated_duration_minutes: Optional[int] = None
-    is_required: bool = True
-    prerequisites: Optional[Dict[str, Any]] = None
-    settings: Optional[Dict[str, Any]] = None
-
-
-class VideoContentCreate(SQLModel):
-    platform: VideoPlatform
-    external_video_id: str
-    video_url: str
-    thumbnail_url: Optional[str] = None
-    duration_seconds: Optional[int] = None
-    title: Optional[str] = None
-    description: Optional[str] = None
-    embed_settings: Optional[Dict[str, Any]] = None
-
-
-class DocumentContentCreate(SQLModel):
-    platform: DocumentPlatform
-    external_file_id: Optional[str] = None
-    file_url: str
-    embed_url: Optional[str] = None
-    file_name: str
-    file_type: str
-    file_size_bytes: Optional[int] = None
-    viewer_settings: Optional[Dict[str, Any]] = None
-
-
-class QuizContentCreate(SQLModel):
-    quiz_settings: Optional[Dict[str, Any]] = None
-    passing_score: Optional[float] = None
-    show_results: ShowResults = ShowResults.IMMEDIATE
-    randomize_questions: bool = False
-
-
-class QuizQuestionCreate(SQLModel):
-    question_text: str
-    question_type: QuestionType
-    options: Optional[Dict[str, Any]] = None
-    correct_answer: Optional[Dict[str, Any]] = None
-    points: float = 1.0
-    explanation: Optional[str] = None
-    order_index: Optional[int] = None
-
-
-# Update forward references
-CourseWithSections.model_rebuild()
-SectionWithModules.model_rebuild()
+# save

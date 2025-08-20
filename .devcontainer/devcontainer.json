@@ -15,7 +15,7 @@
   // connected. This is typically a file mount in .devcontainer/docker-compose.yml
   "workspaceFolder": "/app",
 
-  "postCreateCommand": "pip install -r requirements.txt",
+  "postCreateCommand": "pip install -r requirements.txt && chmod 700 ~/.ssh",
 
   // Features to add to the dev container. More info: https://containers.dev/features.
   // "features": {
@@ -67,5 +67,14 @@
   },
 
   // Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
-  "remoteUser": "www"
+  "remoteUser": "www",
+
+  // link git
+  "mounts": [
+    "source=${localEnv:HOME}/.gitconfig,target=/home/www/.gitconfig,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.ssh,target=/home/www/.ssh,type=bind,consistency=cached"
+  ],
+  "remoteEnv": {
+    "GIT_SSH_COMMAND": "ssh -i /home/www/.ssh/id_rsa -o StrictHostKeyChecking=no"
+  }
 }
