@@ -37,12 +37,12 @@ class Chat(ChatBase, table=True):
         foreign_key="account.id", ondelete="SET NULL", index=True, default=None
     )  # User who created the chat
     course_id: Optional[uuid.UUID] = Field(
-        foreign_key="courses.id", default=None, ondelete="SET NULL"
+        foreign_key="course.id", default=None, ondelete="SET NULL"
     )  # Optional course association
 
     # Relationships
     course: Optional["Course"] = Relationship(back_populates="chats")
-    account: Optional["Account"] = Relationship(back_populates="chats")
+    account: Optional["Account"] = Relationship(back_populates="created_chats")
     messages: list["Message"] = Relationship(back_populates="chat", cascade_delete=True)
     members: list["ChatMember"] = Relationship(
         back_populates="chat", passive_deletes="all"
@@ -72,17 +72,24 @@ class ChatMemberBase(AppBaseModel):
 
 class ChatMember(ChatMemberBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    chat_id: uuid.UUID = Field(foreign_key="chats.id", index=True, ondelete="CASCADE")
+    chat_id: uuid.UUID = Field(foreign_key="chat.id", index=True, ondelete="CASCADE")
     account_id: uuid.UUID = Field(
-        foreign_key="account.id", ondelete="SET NULL", index=True
+        foreign_key="account.id", ondelete="CASCADE", index=True
     )
     last_read_message_id: Optional[uuid.UUID] = Field(
-        foreign_key="messages.id", default=None
+        foreign_key="message.id", default=None
     )
 
     # Relationships
     chat: Chat = Relationship(back_populates="members")
     last_read_message: Optional["Message"] = Relationship()
+    account: "Account" = Relationship(back_populates="chats")
+    messages: list["Message"] = Relationship(
+        back_populates="sender", passive_deletes="all"
+    )
+    chat_invites: list["ChatInvite"] = Relationship(
+        back_populates="invited_by", passive_deletes="all"
+    )
 
     # Unique constraint
     class Config:
@@ -114,17 +121,17 @@ class MessageBase(AppBaseModel):
 
 class Message(MessageBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    chat_id: uuid.UUID = Field(foreign_key="chats.id", index=True, ondelete="CASCADE")
+    chat_id: uuid.UUID = Field(foreign_key="chat.id", index=True, ondelete="CASCADE")
     sender_id: Optional[uuid.UUID] = Field(
-        foreign_key="account.id", index=True, default=None, ondelete="SET NULL"
+        foreign_key="chat_member.id", index=True, default=None, ondelete="SET NULL"
     )  # Null for system messages
-    reply_to_id: Optional[int] = Field(
-        foreign_key="messages.id", default=None
+    reply_to_id: Optional[uuid.UUID] = Field(
+        foreign_key="message.id", default=None
     )  # For replies
 
     # Relationships
     chat: Chat = Relationship(back_populates="messages")
-    sender: Optional["Account"] = Relationship(back_populates="")
+    sender: Optional["ChatMember"] = Relationship(back_populates="messages")
     reply_to: Optional["Message"] = Relationship(
         sa_relationship_kwargs={"remote_side": "Message.id"}
     )
@@ -148,15 +155,21 @@ class Message(MessageBase, table=True):
         }
 
 
-class MessageReaction(TimestampMixin, table=True):
+class MessageReactionBase(AppBaseModel):
+    emoji: str = Field(max_length=10)  # Emoji unicode or shortcode
+
+
+class MessageReaction(MessageReactionBase, table=True):
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    message_id: int = Field(foreign_key="messages.id", index=True)
-    account_id: int = Field(index=True)
-    emoji: str = Field(max_length=10)  # Emoji unicode or shortcode
+    message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
+    account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
 
     # Relationships
     message: Message = Relationship(back_populates="reactions")
+    account: "Account" = Relationship(back_populates="chat_reactions")
 
     # Unique constraint - one reaction per user per message per emoji
     class Config:
@@ -168,15 +181,7 @@ class MessageReaction(TimestampMixin, table=True):
         }
 
 
-class ChatInvite(TimestampMixin, table=True):
-    __tablename__ = "chat_invites"
-
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    chat_id: int = Field(foreign_key="chats.id", index=True)
-    invited_by: int = Field(index=True)
-    invited_account_id: Optional[int] = Field(
-        index=True, default=None
-    )  # Specific user invite
+class ChatInviteBase(AppBaseModel):
     invite_code: Optional[str] = Field(
         max_length=50, unique=True, default=None
     )  # Public invite link
@@ -185,8 +190,21 @@ class ChatInvite(TimestampMixin, table=True):
     expires_at: Optional[datetime] = None
     is_active: bool = Field(default=True)
 
+
+class ChatInvite(ChatInviteBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    chat_id: uuid.UUID = Field(foreign_key="chat.id", index=True)
+    invited_by_id: uuid.UUID = Field(
+        foreign_key="member.id", index=True, ondelete="CASCADE"
+    )
+    invited_account_id: Optional[uuid.UUID] = Field(
+        foreign_key="account.id", index=True, default=None, ondelete="CASCADE"
+    )  # Specific user invite
+
     # Relationships
     chat: Chat = Relationship()
+    invited_by: ChatMember = Relationship(back_populates="chat_invites")
+    invited_account: "Account" = Relationship(back_populates="chat_invites")
 
     # Indexes
     class Config:

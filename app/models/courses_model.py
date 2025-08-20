@@ -26,6 +26,7 @@ from app.models.base import AppBaseModel
 
 if TYPE_CHECKING:
     from .chat_model import Chat
+    from .comments_model import Comment, Rating
     from .user_model import Account
 
 
@@ -56,6 +57,9 @@ class CourseBase(AppBaseModel):
     enrollment_type: EnrollmentType = Field(default=EnrollmentType.OPEN)
     visibility: VisibilityType = Field(default=VisibilityType.PUBLIC)
     certification_enabled: bool = Field(default=False)
+    average_rating: float = Field(default=0.00)
+    total_rating: int = Field(default=0)
+    stars: int = Field(default=0)
 
 
 class Course(CourseBase, table=True):
@@ -74,6 +78,12 @@ class Course(CourseBase, table=True):
         back_populates="course", passive_deletes="all"
     )
     chats: list["Chat"] = Relationship(back_populates="course", passive_deletes="all")
+    ratings: list["Rating"] = Relationship(
+        back_populates="course", passive_deletes="all"
+    )
+    comments: list["Comment"] = Relationship(
+        back_populates="course", passive_deletes="all"
+    )
 
 
 class SectionBase(AppBaseModel):
@@ -94,7 +104,7 @@ class SectionBase(AppBaseModel):
 class Section(SectionBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     course_id: uuid.UUID = Field(
-        foreign_key="courses.id", index=True, ondelete="CASCADE"
+        foreign_key="course.id", index=True, ondelete="CASCADE"
     )
 
     # Relationships
@@ -127,7 +137,7 @@ class Module(ModuleBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
 
     section_id: uuid.UUID = Field(
-        foreign_key="sections.id", index=True, ondelete="CASCADE"
+        foreign_key="section.id", index=True, ondelete="CASCADE"
     )
 
     section: Section = Relationship(back_populates="modules")
@@ -188,7 +198,7 @@ class VideoContentBase(AppBaseModel):
 # Content-specific models
 class VideoContent(VideoContentBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    module_id: int = Field(foreign_key="modules.id", unique=True, ondelete="CASCADE")
+    module_id: int = Field(foreign_key="module.id", unique=True, ondelete="CASCADE")
 
     # Relationships
     module: Module = Relationship(back_populates="video_content")
@@ -209,7 +219,7 @@ class DocumentBase(AppBaseModel):
 
 class DocumentContent(DocumentBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    module_id: int = Field(foreign_key="modules.id", unique=True, ondelete="CASCADE")
+    module_id: int = Field(foreign_key="module.id", unique=True, ondelete="CASCADE")
 
     # Relationships
     module: Module = Relationship(back_populates="document_content")
@@ -226,7 +236,7 @@ class QuizContentBase(AppBaseModel):
 
 class QuizContent(QuizContentBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    module_id: int = Field(foreign_key="modules.id", unique=True, ondelete="CASCADE")
+    module_id: int = Field(foreign_key="module.id", unique=True, ondelete="CASCADE")
 
     # Relationships
     module: Module = Relationship(back_populates="quiz_content")
@@ -277,7 +287,7 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
     course_id: uuid.UUID = Field(
-        foreign_key="courses.id", index=True, ondelete="SET NULL"
+        foreign_key="course.id", index=True, ondelete="SET NULL"
     )
 
     # Relationships
