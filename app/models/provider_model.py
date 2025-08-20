@@ -5,15 +5,11 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship
 
+from app.common.enum import Providers
 from app.models.base import AppBaseModel
 
 if TYPE_CHECKING:
     from .user_model import Account
-
-
-class Providers(str, Enum):
-    GOOGLE = "google"
-    GITHUB = "github"
 
 
 class ProviderBase(AppBaseModel):

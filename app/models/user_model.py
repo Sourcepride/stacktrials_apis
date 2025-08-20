@@ -8,6 +8,7 @@ from sqlmodel import Field, Relationship
 from app.models.base import AppBaseModel
 
 if TYPE_CHECKING:
+    from .courses_model import Course, QuizAttempt
     from .provider_model import Provider
 
 
@@ -31,6 +32,13 @@ class Account(AccountBase, table=True):
         # sa_relationship_kwargs={"cascade": "all, delete-orphan"},
     )
 
+    courses: list["Course"] = Relationship(
+        back_populates="author",
+    )
+    quizes: list["QuizAttempt"] = Relationship(
+        back_populates="account", passive_deletes="all"
+    )
+
 
 class ProfileBase(AppBaseModel):
     display_name: Optional[str] = None
@@ -40,5 +48,7 @@ class ProfileBase(AppBaseModel):
 
 class Profile(ProfileBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    account_id: uuid.UUID = Field(foreign_key="account.id", index=True, unique=True)
+    account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, unique=True, ondelete="CASCADE"
+    )
     account: Account = Relationship(back_populates="profile")
