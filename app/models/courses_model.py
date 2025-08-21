@@ -63,10 +63,16 @@ class CourseBase(AppBaseModel):
 
 
 class Course(CourseBase, table=True):
+    __table_args__ = (
+        Index("ix_search_filter", "title", "status", "visibility", "enrollment_type"),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
 
     # Relationships
-    account_id: uuid.UUID = Field(foreign_key="account.id", ondelete="SET NULL")
+    account_id: Optional[uuid.UUID] = Field(
+        foreign_key="account.id", ondelete="SET NULL"
+    )
     author: Optional["Account"] = Relationship(back_populates="courses")
     sections: list["Section"] = Relationship(
         back_populates="course", passive_deletes="all"
@@ -175,6 +181,8 @@ class ModuleAttachmentBase(AppBaseModel):
 
 
 class ModuleAttachment(ModuleAttachmentBase, table=True):
+    __tablename__: str = "module_attachment"
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     module_id: uuid.UUID = Field(
         foreign_key="module.id", index=True, ondelete="CASCADE"
@@ -197,8 +205,12 @@ class VideoContentBase(AppBaseModel):
 
 # Content-specific models
 class VideoContent(VideoContentBase, table=True):
+    __tablename__: str = "video_content"
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    module_id: int = Field(foreign_key="module.id", unique=True, ondelete="CASCADE")
+    module_id: uuid.UUID = Field(
+        foreign_key="module.id", unique=True, ondelete="CASCADE"
+    )
 
     # Relationships
     module: Module = Relationship(back_populates="video_content")
@@ -218,8 +230,12 @@ class DocumentBase(AppBaseModel):
 
 
 class DocumentContent(DocumentBase, table=True):
+    __tablename__: str = "document_content"
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    module_id: int = Field(foreign_key="module.id", unique=True, ondelete="CASCADE")
+    module_id: uuid.UUID = Field(
+        foreign_key="module.id", unique=True, ondelete="CASCADE"
+    )
 
     # Relationships
     module: Module = Relationship(back_populates="document_content")
@@ -235,8 +251,12 @@ class QuizContentBase(AppBaseModel):
 
 
 class QuizContent(QuizContentBase, table=True):
+    __tablename__: str = "quiz_content"
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    module_id: int = Field(foreign_key="module.id", unique=True, ondelete="CASCADE")
+    module_id: uuid.UUID = Field(
+        foreign_key="module.id", unique=True, ondelete="CASCADE"
+    )
 
     # Relationships
     module: Module = Relationship(back_populates="quiz_content")
@@ -261,8 +281,12 @@ class QuizQuestionBase(AppBaseModel):
 
 
 class QuizQuestion(QuizQuestionBase, table=True):
+    __tablename__: str = "quiz_question"
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    quiz_id: int = Field(foreign_key="quiz_content.id", index=True, ondelete="CASCADE")
+    quiz_id: uuid.UUID = Field(
+        foreign_key="quiz_content.id", index=True, ondelete="CASCADE"
+    )
 
     # Relationships
     quiz: QuizContent = Relationship(back_populates="questions")
@@ -282,21 +306,26 @@ class CourseEnrollmentBase(SQLModel):
 
 # Progress tracking models
 class CourseEnrollment(CourseEnrollmentBase, table=True):
+    __tablename__: str = "course_enrollment"
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "course_id", name="ix_enroll_account_course"),
+    )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
-    course_id: uuid.UUID = Field(
+    course_id: Optional[uuid.UUID] = Field(
         foreign_key="course.id", index=True, ondelete="SET NULL"
     )
 
     # Relationships
-    course: Course = Relationship(back_populates="enrollments")
+    course: Optional[Course] = Relationship(back_populates="enrollments")
     account: "Account" = Relationship(back_populates="enrollments")
 
     # Unique constraint
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [{"fields": ["account_id", "course_id"], "unique": True}]
         }
 
@@ -318,21 +347,27 @@ class CourseProgressBase(AppBaseModel):
 
 
 class CourseProgress(CourseProgressBase, table=True):
+    __tablename__: str = "course_progress"
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "course_id", name="ix_progress_account_course"),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
-    course_id: uuid.UUID = Field(
+    course_id: Optional[uuid.UUID] = Field(
         foreign_key="course.id", index=True, ondelete="SET NULL"
     )
 
     # Relationships
-    course: Course = Relationship(back_populates="progress_records")
+    course: Optional[Course] = Relationship(back_populates="progress_records")
     account: "Account" = Relationship(back_populates="progress_records")
 
     # Unique constraint
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [{"fields": ["account_id", "course_id"], "unique": True}]
         }
 
@@ -347,13 +382,18 @@ class QuizAttemptBase(SQLModel):
 
 
 class QuizAttempt(QuizAttemptBase, table=True):
+    __tablename__: str = "quiz_attempt"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    account_id: int = Field(foreign_key="account.id", index=True, ondelete="CASCADE")
-    quiz_id: int = Field(foreign_key="quiz_content.id", index=True, ondelete="SET NULL")
+    account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
+    quiz_id: Optional[uuid.UUID] = Field(
+        foreign_key="quiz_content.id", index=True, ondelete="SET NULL"
+    )
 
     # Relationships
-    quiz: QuizContent = Relationship(back_populates="attempts")
+    quiz: Optional[QuizContent] = Relationship(back_populates="attempts")
     account: "Account" = Relationship(back_populates="quizes")
 
 

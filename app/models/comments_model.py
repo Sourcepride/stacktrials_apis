@@ -5,6 +5,7 @@
 import uuid
 from typing import TYPE_CHECKING, Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship
 
 from app.models.base import AppBaseModel
@@ -20,8 +21,13 @@ class RatingBase(AppBaseModel):
 
 
 class Rating(RatingBase, table=True):
+    __table_args__ = (
+        UniqueConstraint("account_id", "course_id", name="uix_account_course"),
+    )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    account_id: uuid.UUID = Field(foreign_key="account.id", ondelete="CASCADE")
+    account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
     course_id: Optional[uuid.UUID] = Field(
         foreign_key="course.id", index=True, default=None, ondelete="SET NULL"
     )
@@ -34,9 +40,11 @@ class Rating(RatingBase, table=True):
 
     # unique constraint
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [
                 {"fields": ["account_id", "course_id"], "unique": True},
+                {"fields": ["course_id"]},
+                {"fields": ["account_id"]},
             ]
         }
 

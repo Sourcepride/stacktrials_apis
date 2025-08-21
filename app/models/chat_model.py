@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column
+from sqlalchemy import Column, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
@@ -21,16 +21,20 @@ if TYPE_CHECKING:
 
 
 class ChatBase(AppBaseModel):
-    chat_type: ChatType
+    chat_type: ChatType = Field(index=True)
     name: Optional[str] = Field(max_length=255, default=None)  # For group chats
     description: Optional[str] = None  # For group chats
     avatar_url: Optional[str] = Field(max_length=500, default=None)
-    privacy: Optional[GroupChatPrivacy] = None  # Only for group chats
+    privacy: Optional[GroupChatPrivacy] = Field(
+        index=True, default=None
+    )  # Only for group chats
     is_active: bool = Field(default=True)
     max_members: Optional[int] = Field(default=None, ge=2, le=50)
 
 
 class Chat(ChatBase, table=True):
+
+    __table_args__ = (Index("ix_privacy_active", "privacy", "is_active"),)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
 
     account_id: Optional[uuid.UUID] = Field(
@@ -50,7 +54,7 @@ class Chat(ChatBase, table=True):
 
     # Indexes
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [
                 {"fields": ["chat_type"]},
                 {"fields": ["privacy"]},
@@ -63,7 +67,7 @@ class Chat(ChatBase, table=True):
 
 class ChatMemberBase(AppBaseModel):
     role: MemberRole = Field(default=MemberRole.MEMBER)
-    status: MemberStatus = Field(default=MemberStatus.ACTIVE, index=True)
+    status: MemberStatus = Field(default=MemberStatus.ACTIVE)
     joined_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     left_at: Optional[datetime] = None
     notifications_enabled: bool = Field(default=True)
@@ -71,6 +75,14 @@ class ChatMemberBase(AppBaseModel):
 
 
 class ChatMember(ChatMemberBase, table=True):
+    __tablename__: str = "chat_member"
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "chat_id", name="uix_account_chat"),
+        Index("ix_account_status", "account_id", "status"),
+        Index("ix_chat_role", "chat_id", "role"),
+    )
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     chat_id: uuid.UUID = Field(foreign_key="chat.id", index=True, ondelete="CASCADE")
     account_id: uuid.UUID = Field(
@@ -93,7 +105,7 @@ class ChatMember(ChatMemberBase, table=True):
 
     # Unique constraint
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [
                 {"fields": ["account_id", "chat_id"], "unique": True},
                 {"fields": ["account_id", "status"]},
@@ -114,12 +126,14 @@ class MessageBase(AppBaseModel):
     edited_at: Optional[datetime] = None
     is_deleted: bool = Field(default=False)
     deleted_at: Optional[datetime] = None
-    metadata: Optional[dict[str, Any]] = Field(
+    extra_data: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )  # Extra data
 
 
 class Message(MessageBase, table=True):
+    __table_args__ = (Index("ix_chat_created_at", "chat_id", "created_at"),)
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     chat_id: uuid.UUID = Field(foreign_key="chat.id", index=True, ondelete="CASCADE")
     sender_id: Optional[uuid.UUID] = Field(
@@ -144,13 +158,13 @@ class Message(MessageBase, table=True):
 
     # Indexes
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [
                 {"fields": ["chat_id", "created_at"]},
                 {"fields": ["sender_id"]},
                 {"fields": ["message_type"]},
-                {"fields": ["reply_to_id"]},
-                {"fields": ["is_deleted"]},
+                # {"fields": ["reply_to_id"]},
+                # {"fields": ["is_deleted"]},
             ]
         }
 
@@ -160,6 +174,12 @@ class MessageReactionBase(AppBaseModel):
 
 
 class MessageReaction(MessageReactionBase, table=True):
+    __tablename__: str = "message_reaction"
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "message_id", name="uix_account_message"),
+        Index("ix_message_emoji", "message_id", "emoji"),
+    )
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     message_id: uuid.UUID = Field(foreign_key="message.id", index=True)
@@ -173,9 +193,9 @@ class MessageReaction(MessageReactionBase, table=True):
 
     # Unique constraint - one reaction per user per message per emoji
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [
-                {"fields": ["account_id", "message_id", "emoji"], "unique": True},
+                {"fields": ["account_id", "message_id"], "unique": True},
                 {"fields": ["message_id", "emoji"]},
             ]
         }
@@ -183,7 +203,7 @@ class MessageReaction(MessageReactionBase, table=True):
 
 class ChatInviteBase(AppBaseModel):
     invite_code: Optional[str] = Field(
-        max_length=50, unique=True, default=None
+        max_length=50, unique=True, index=True, default=None
     )  # Public invite link
     max_uses: Optional[int] = Field(default=None, ge=1)  # Limit uses for invite code
     current_uses: int = Field(default=0, ge=0)
@@ -192,13 +212,13 @@ class ChatInviteBase(AppBaseModel):
 
 
 class ChatInvite(ChatInviteBase, table=True):
+    __tablename__: str = "chat_invite"
+
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     chat_id: uuid.UUID = Field(foreign_key="chat.id", index=True)
-    invited_by_id: uuid.UUID = Field(
-        foreign_key="member.id", index=True, ondelete="CASCADE"
-    )
+    invited_by_id: uuid.UUID = Field(foreign_key="chat_member.id", ondelete="CASCADE")
     invited_account_id: Optional[uuid.UUID] = Field(
-        foreign_key="account.id", index=True, default=None, ondelete="CASCADE"
+        foreign_key="account.id", default=None, ondelete="CASCADE"
     )  # Specific user invite
 
     # Relationships
@@ -208,12 +228,12 @@ class ChatInvite(ChatInviteBase, table=True):
 
     # Indexes
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "indexes": [
                 {"fields": ["chat_id", "is_active"]},
-                {"fields": ["invited_account_id"]},
+                # {"fields": ["invited_account_id"]},
                 {"fields": ["invite_code"]},
-                {"fields": ["expires_at"]},
+                # {"fields": ["expires_at"]},
             ]
         }
 
