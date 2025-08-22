@@ -19,8 +19,6 @@ async def google_callback_handler(request: Request, session: Session):
     token = await oauth.google.authorize_access_token(request)
     userinfo = token.get("userinfo")
 
-    print("++++++++++++++++", userinfo)
-
     if not userinfo:
         # Fallback: some providers place claims in id_token
         id_token = token.get("id_token")
@@ -31,24 +29,60 @@ async def google_callback_handler(request: Request, session: Session):
     email = userinfo["email"]
     sub = userinfo["sub"]
 
+    return authorize_or_register(
+        session, email, Providers.GOOGLE, sub, "openid email profile"
+    )
+
+
+async def github_callback_handler(request: Request, session: Session):
+    assert oauth.github is not None
+    token = await oauth.github.authorize_access_token(request)
+
+    resp = await oauth.github.get("user", token=token)
+    profile = resp.json()
+
+    provider_id = str(profile["id"])
+    email = profile.get("email")
+
+    # If email not available, fetch from /user/emails
+    if not email:
+        emails_resp = await oauth.github.get("user/emails", token=token)
+        emails = emails_resp.json()
+        verified_emails = [e for e in emails if e.get("verified")]
+        if verified_emails:
+            # Prefer primary verified email
+            primary = next(
+                (e for e in verified_emails if e.get("primary")), verified_emails[0]
+            )
+            email = primary["email"]
+
+    return authorize_or_register(
+        session, email, Providers.GITHUB, provider_id, "read:user user:email"
+    )
+
+
+def authorize_or_register(
+    session: Session,
+    email: str,
+    provider: Providers,
+    provider_id: str,
+    scopes: Optional[str] = None,
+):
     # Upsert user
     statement = select(Provider).where(
-        Provider.provider == Providers.GOOGLE, Provider.provider_id == sub
+        Provider.provider == provider, Provider.provider_id == provider_id
     )
     existing = session.exec(statement).first()
 
     if existing:
         user = existing.account
     else:
-        user = register_account(
-            session, email, Providers.GOOGLE.value, sub, scopes="openid email profile"
-        )
+        user = create_account(session, email, provider.value, provider_id, scopes)
     access, refresh = (
         create_jwt_token(str(user.id), email),
         create_jwt_token(str(user.id), email, "refresh"),
     )
 
-    # Return tokens as JSON (or set HttpOnly cookies if you prefer)
     return {
         "access_token": access,
         "refresh_token": refresh,
@@ -58,21 +92,30 @@ async def google_callback_handler(request: Request, session: Session):
     }
 
 
-def register_account(
+def create_account(
     session: Session,
     email: str,
     provider: str,
     provider_id: str,
     scopes: Optional[str] = None,
 ) -> Account:
-    account = Account(
-        username=generate_random_username(session, email.split("@")[0]),
-        email=email,
-        profile=Profile(),  # type: ignore
-    )
 
-    provider = Provider(provider=provider, provider_id=provider_id, account=account, scopes=scopes)  # type: ignore
-    session.add(provider)
+    account = session.exec(select(Account).where(Account.email == email)).first()
+
+    if not account:
+        profile = Profile()  # type: ignore
+        account = Account(
+            username=generate_random_username(session, email.split("@")[0]),
+            email=email,
+            profile=profile,
+        )
+        session.add(account)
+
+    provider_obj = Provider(
+        provider=provider, provider_id=provider_id, scopes=scopes, account=account
+    )  # type:  ignore
+
+    session.add(provider_obj)
     session.commit()
 
     session.refresh(account)

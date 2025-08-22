@@ -94,10 +94,14 @@ class ChatMember(ChatMemberBase, table=True):
 
     # Relationships
     chat: Chat = Relationship(back_populates="members")
-    last_read_message: Optional["Message"] = Relationship()
+    last_read_message: Optional["Message"] = Relationship(
+        sa_relationship_kwargs={"foreign_keys": "[ChatMember.last_read_message_id]"}
+    )
     account: "Account" = Relationship(back_populates="chats")
     messages: list["Message"] = Relationship(
-        back_populates="sender", passive_deletes="all"
+        back_populates="sender",
+        passive_deletes="all",
+        sa_relationship_kwargs={"foreign_keys": "[Message.sender_id]"},
     )
     chat_invites: list["ChatInvite"] = Relationship(
         back_populates="invited_by", passive_deletes="all"
@@ -145,7 +149,10 @@ class Message(MessageBase, table=True):
 
     # Relationships
     chat: Chat = Relationship(back_populates="messages")
-    sender: Optional["ChatMember"] = Relationship(back_populates="messages")
+    sender: Optional["ChatMember"] = Relationship(
+        back_populates="messages",
+        sa_relationship_kwargs={"foreign_keys": "[Message.sender_id]"},
+    )
     reply_to: Optional["Message"] = Relationship(
         sa_relationship_kwargs={"remote_side": "Message.id"}
     )

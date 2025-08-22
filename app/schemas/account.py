@@ -1,4 +1,5 @@
 import uuid
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -7,7 +8,7 @@ from app.models.user_model import AccountBase, Profile
 
 class AccountRead(AccountBase):
     id: uuid.UUID
-    profile: Profile
+    profile: Optional[Profile] = None
 
 
 class Token(BaseModel):

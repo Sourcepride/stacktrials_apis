@@ -3,6 +3,7 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
+from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship
 
 from app.common.enum import Providers
@@ -20,6 +21,9 @@ class ProviderBase(AppBaseModel):
 
 
 class Provider(ProviderBase, table=True):
+    __table_args__ = (
+        UniqueConstraint("account_id", "provider", name="uix_account_provider"),
+    )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     access_token: Optional[str] = None
     refresh_token: Optional[str] = None
@@ -28,3 +32,5 @@ class Provider(ProviderBase, table=True):
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
     account: "Account" = Relationship(back_populates="providers")
+
+    # TODO:  add unique constriant between  account_id and provider

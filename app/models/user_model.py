@@ -40,7 +40,7 @@ class Account(AccountBase, table=True):
     quizes: list["QuizAttempt"] = Relationship(
         back_populates="account", passive_deletes="all"
     )
-    enrollment: list["CourseEnrollment"] = Relationship(
+    enrollments: list["CourseEnrollment"] = Relationship(
         back_populates="account", passive_deletes="all"
     )
     progress_records: list["CourseProgress"] = Relationship(
@@ -48,9 +48,6 @@ class Account(AccountBase, table=True):
     )
     created_chats: list["Chat"] = Relationship(
         back_populates="account", passive_deletes="all"
-    )
-    messages: list["Message"] = Relationship(
-        back_populates="sender", passive_deletes="all"
     )
     chats: list["ChatMember"] = Relationship(
         back_populates="account", passive_deletes="all"
