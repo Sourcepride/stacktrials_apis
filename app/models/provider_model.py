@@ -1,6 +1,5 @@
 import uuid
 from datetime import datetime
-from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import UniqueConstraint
@@ -23,6 +22,7 @@ class ProviderBase(AppBaseModel):
 class Provider(ProviderBase, table=True):
     __table_args__ = (
         UniqueConstraint("account_id", "provider", name="uix_account_provider"),
+        UniqueConstraint("provider_id", "provider", name="uix_id_provider"),
     )
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     access_token: Optional[str] = None

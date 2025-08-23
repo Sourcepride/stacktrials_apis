@@ -1,16 +1,17 @@
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.encoders import jsonable_encoder
-from sqlmodel import select
+import secrets
 
-from app.common.constants import ACCESS_TOKEN_MINUTES, GITHUB_REDIRECT_URI
-from app.common.enum import Providers
-from app.core.dependencies import SessionDep
-from app.core.security import create_jwt_token, oauth
-from app.models.provider_model import Provider
-from app.models.user_model import Account
-from app.schemas.account import AccountRead, Token
+from fastapi import APIRouter, Request
 
-from .service import github_callback_handler, google_callback_handler
+from app.common.constants import DROPBOX_REDIRECT_URI, GITHUB_REDIRECT_URI
+from app.core.dependencies import CurrentActiveUser, SessionDep, get_current_active_user
+from app.core.security import oauth, sign_state
+from app.schemas.account import Token
+
+from .service import (
+    dropbox_callback_handler,
+    github_callback_handler,
+    google_callback_handler,
+)
 
 router = APIRouter()
 
@@ -37,3 +38,21 @@ async def github_login(request: Request):
 @router.get("/github/callback", response_model=Token)
 async def github_callback(request: Request, session: SessionDep):
     return await github_callback_handler(request, session)
+
+
+@router.get("/providers/dropbox/login", description="add dropbox storage")
+async def login_dropbox(request: Request, current_user: CurrentActiveUser):
+    redirect_uri = DROPBOX_REDIRECT_URI or request.url_for("dropbox_callback")
+
+    state_payload = {
+        "user_id": str(current_user.id),
+        "nonce": secrets.token_urlsafe(16),
+    }
+    state = sign_state(state_payload, expires_seconds=300)
+    assert oauth.dropbox is not None
+    return await oauth.dropbox.authorize_redirect(request, redirect_uri, state=state)
+
+
+@router.get("/auth/dropbox/callback")
+async def dropbox_callback(request: Request, session: SessionDep):
+    return await dropbox_callback_handler(request, session)

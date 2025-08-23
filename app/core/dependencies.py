@@ -1,10 +1,10 @@
 # Shared dependencies for routes
 
 
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import Engine
 from sqlmodel import Session
 
@@ -24,14 +24,17 @@ def get_session():
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
-def get_current_user(token: Annotated[str, Depends(http_bearer)], session: SessionDep):
+def get_current_user(
+    token: Annotated[HTTPAuthorizationCredentials, Depends(http_bearer)],
+    session: SessionDep,
+):
     exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    values = decode_token(token)
+    values = decode_token(token.credentials)
     user_id = values.get("user_id")
     if not user_id:
         raise exception
@@ -51,3 +54,6 @@ def get_current_active_user(
         raise HTTPException(status_code=403, detail="Inactive account")
 
     return current_user
+
+
+CurrentActiveUser = Annotated["Account", Depends(get_current_active_user)]

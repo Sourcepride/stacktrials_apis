@@ -154,10 +154,18 @@ class Message(MessageBase, table=True):
         sa_relationship_kwargs={"foreign_keys": "[Message.sender_id]"},
     )
     reply_to: Optional["Message"] = Relationship(
-        sa_relationship_kwargs={"remote_side": "Message.id"}
+        back_populates="replies",
+        sa_relationship_kwargs={
+            "remote_side": "[Message.id]",
+            "foreign_keys": "[Message.reply_to_id]",
+        },
     )
     replies: list["Message"] = Relationship(
-        sa_relationship_kwargs={"remote_side": "Message.reply_to_id"}
+        back_populates="reply_to",
+        sa_relationship_kwargs={
+            "foreign_keys": "[Message.reply_to_id]",
+            "overlaps": "reply_to",
+        },
     )
     reactions: list["MessageReaction"] = Relationship(
         back_populates="message", cascade_delete=True

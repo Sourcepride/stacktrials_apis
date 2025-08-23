@@ -1,3 +1,5 @@
+import base64
+import json
 from typing import Optional
 
 from fastapi import HTTPException, Request
@@ -9,7 +11,7 @@ from sqlmodel import Session, select
 from app.common.constants import ACCESS_TOKEN_MINUTES, GOOGLE_CLIENT_ID
 from app.common.enum import Providers
 from app.common.utils import generate_random_username
-from app.core.security import create_jwt_token, oauth
+from app.core.security import create_jwt_token, oauth, verify_state
 from app.models.provider_model import Provider
 from app.models.user_model import Account, Profile
 
@@ -59,6 +61,44 @@ async def github_callback_handler(request: Request, session: Session):
     return authorize_or_register(
         session, email, Providers.GITHUB, provider_id, "read:user user:email"
     )
+
+
+async def dropbox_callback_handler(request: Request, session: Session):
+
+    account = get_account_from_state(request, session)
+
+    assert oauth.dropbox is not None
+    token = await oauth.dropbox.authorize_access_token(request)
+
+    if not token:
+        raise HTTPException(status_code=400, detail="Failed to obtain token")
+
+    # token contains access_token, refresh_token, expires_at, etc.
+    access_token = token.get("access_token")
+    refresh_token = token.get("refresh_token")
+    scopes = token.get("scope")
+
+    # Get Dropbox account info
+    resp = await oauth.dropbox.post("users/get_current_account", token=token)
+    user_info = resp.json()
+    provider_id = user_info["account_id"]
+
+    provider_obj = Provider(
+        provider=Providers.DROP_BOX,
+        provider_id=provider_id,
+        scopes=scopes,
+        account_id=account.id,
+        access_token=access_token,
+        refresh_token=refresh_token,
+    )
+
+    session.add(provider_obj)
+    session.commit()
+
+    return {"ok": True}
+
+
+# -------- HELPER FUNCTIONS ---------
 
 
 def authorize_or_register(
@@ -138,3 +178,25 @@ def verify_google_auth_token(id_token_str: str) -> dict:
         }
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid ID token: {e}")
+
+
+def get_account_from_state(request: Request, session: Session):
+    raw_state = request.query_params.get("state", "")
+
+    if not raw_state:
+        HTTPException(status_code=400, detail="A mandatory signed state is required")
+
+    payload = verify_state(raw_state)
+
+    if not payload:
+        # invalid/expired state — reject or treat as anonymous
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    user_id = payload.get("user_id")
+
+    account = session.get(Account, user_id)
+
+    if not account:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+
+    return account

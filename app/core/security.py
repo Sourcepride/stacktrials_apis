@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 
 import jwt
 from authlib.integrations.starlette_client import OAuth
@@ -6,6 +7,8 @@ from fastapi import HTTPException
 
 from app.common.constants import (
     ACCESS_TOKEN_MINUTES,
+    DROPBOX_CLIENT_ID,
+    DROPBOX_CLIENT_SECRET,
     GITHUB_CLIENT_ID,
     GITHUB_CLIENT_SECRET,
     GOOGLE_CLIENT_ID,
@@ -35,6 +38,18 @@ oauth.register(
     client_kwargs={"scope": "read:user user:email"},
 )
 
+oauth.register(
+    name="dropbox",
+    client_id=DROPBOX_CLIENT_ID,
+    client_secret=DROPBOX_CLIENT_SECRET,
+    authorize_url="https://www.dropbox.com/oauth2/authorize",
+    access_token_url="https://api.dropboxapi.com/oauth2/token",
+    api_base_url="https://api.dropboxapi.com/2/",
+    client_kwargs={
+        "scope": "files.metadata.read files.content.write account_info.read"
+    },
+)
+
 
 def decode_token(token: str) -> dict:
     if JWT_SECRET is None:
@@ -45,6 +60,7 @@ def decode_token(token: str) -> dict:
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
+
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
@@ -73,3 +89,27 @@ def create_jwt_token(user_id: str, email: str, kind: str = "access"):
 
     encoded_jwt = jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALG)
     return encoded_jwt
+
+
+def sign_state(payload: dict[str, Any], expires_seconds: int = 300) -> str:
+    data = payload.copy()
+    data.setdefault(
+        "exp", datetime.now(tz=timezone.utc) + timedelta(seconds=expires_seconds)
+    )
+    data["purpose"] = "oauth_state"
+    if JWT_SECRET is None:
+        raise ValueError("JWT SECRET NOT SET")
+
+    return jwt.encode(data, JWT_SECRET, algorithm="HS256")
+
+
+def verify_state(token: str) -> Optional[dict[str, Any]]:
+    if JWT_SECRET is None:
+        raise ValueError("JWT SECRET NOT SET")
+    try:
+        data = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        if data.get("purpose") != "oauth_state":
+            return None
+        return data
+    except Exception:
+        return None
