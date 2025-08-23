@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 class CourseBase(AppBaseModel):
     title: str = Field(max_length=255, index=True, description="add course title")
     slug: str = Field(unique=True, index=True)
+    image: Optional[str] = None
     description: Optional[str] = Field(
         default=None, description="course description in full (markdown support)"
     )
@@ -60,6 +61,7 @@ class CourseBase(AppBaseModel):
     average_rating: float = Field(default=0.00)
     total_rating: int = Field(default=0)
     stars: int = Field(default=0)
+    enrollment_count: int = Field(default=0)
 
 
 class Course(CourseBase, table=True):
