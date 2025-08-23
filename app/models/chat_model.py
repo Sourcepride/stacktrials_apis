@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Column, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Field, Relationship
+from sqlmodel import Field, Relationship, SQLModel
 
 from app.common.enum import (
     ChatType,
@@ -13,14 +13,14 @@ from app.common.enum import (
     MemberStatus,
     MessageType,
 )
-from app.models.base import AppBaseModel
+from app.models.base import AppBaseModelMixin
 
 if TYPE_CHECKING:
     from .courses_model import Course
     from .user_model import Account
 
 
-class ChatBase(AppBaseModel):
+class ChatBase(SQLModel):
     chat_type: ChatType = Field(index=True)
     name: Optional[str] = Field(max_length=255, default=None)  # For group chats
     description: Optional[str] = None  # For group chats
@@ -32,7 +32,7 @@ class ChatBase(AppBaseModel):
     max_members: Optional[int] = Field(default=None, ge=2, le=50)
 
 
-class Chat(ChatBase, table=True):
+class Chat(AppBaseModelMixin, ChatBase, table=True):
 
     __table_args__ = (Index("ix_privacy_active", "privacy", "is_active"),)
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -65,7 +65,7 @@ class Chat(ChatBase, table=True):
         }
 
 
-class ChatMemberBase(AppBaseModel):
+class ChatMemberBase(SQLModel):
     role: MemberRole = Field(default=MemberRole.MEMBER)
     status: MemberStatus = Field(default=MemberStatus.ACTIVE)
     joined_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
@@ -74,7 +74,7 @@ class ChatMemberBase(AppBaseModel):
     is_pinned: bool = Field(default=False)  # Pin chat for user
 
 
-class ChatMember(ChatMemberBase, table=True):
+class ChatMember(AppBaseModelMixin, ChatMemberBase, table=True):
     __tablename__: str = "chat_member"
 
     __table_args__ = (
@@ -118,7 +118,7 @@ class ChatMember(ChatMemberBase, table=True):
         }
 
 
-class MessageBase(AppBaseModel):
+class MessageBase(SQLModel):
     message_type: MessageType = Field(default=MessageType.TEXT, index=True)
     content: Optional[str] = None  # Text content
     file_url: Optional[str] = Field(max_length=500, default=None)  # For files/images
@@ -135,7 +135,7 @@ class MessageBase(AppBaseModel):
     )  # Extra data
 
 
-class Message(MessageBase, table=True):
+class Message(AppBaseModelMixin, MessageBase, table=True):
     __table_args__ = (Index("ix_chat_created_at", "chat_id", "created_at"),)
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -184,11 +184,11 @@ class Message(MessageBase, table=True):
         }
 
 
-class MessageReactionBase(AppBaseModel):
+class MessageReactionBase(SQLModel):
     emoji: str = Field(max_length=10)  # Emoji unicode or shortcode
 
 
-class MessageReaction(MessageReactionBase, table=True):
+class MessageReaction(AppBaseModelMixin, MessageReactionBase, table=True):
     __tablename__: str = "message_reaction"
 
     __table_args__ = (
@@ -216,7 +216,7 @@ class MessageReaction(MessageReactionBase, table=True):
         }
 
 
-class ChatInviteBase(AppBaseModel):
+class ChatInviteBase(SQLModel):
     invite_code: Optional[str] = Field(
         max_length=50, unique=True, index=True, default=None
     )  # Public invite link
@@ -226,7 +226,7 @@ class ChatInviteBase(AppBaseModel):
     is_active: bool = Field(default=True)
 
 
-class ChatInvite(ChatInviteBase, table=True):
+class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
     __tablename__: str = "chat_invite"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)

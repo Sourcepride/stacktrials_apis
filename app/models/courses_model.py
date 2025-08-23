@@ -22,7 +22,7 @@ from app.common.enum import (
     VideoPlatform,
     VisibilityType,
 )
-from app.models.base import AppBaseModel
+from app.models.base import AppBaseModelMixin
 
 if TYPE_CHECKING:
     from .chat_model import Chat
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 # Core Models
 
 
-class CourseBase(AppBaseModel):
+class CourseBase(SQLModel):
     title: str = Field(max_length=255, index=True, description="add course title")
     slug: str = Field(unique=True, index=True)
     image: Optional[str] = None
@@ -64,7 +64,7 @@ class CourseBase(AppBaseModel):
     enrollment_count: int = Field(default=0)
 
 
-class Course(CourseBase, table=True):
+class Course(AppBaseModelMixin, CourseBase, table=True):
     __table_args__ = (
         Index("ix_search_filter", "title", "status", "visibility", "enrollment_type"),
     )
@@ -94,7 +94,7 @@ class Course(CourseBase, table=True):
     )
 
 
-class SectionBase(AppBaseModel):
+class SectionBase(SQLModel):
     title: str = Field(max_length=255)
     description: Optional[str] = None
     learning_objectives: Optional[list[str]] = Field(
@@ -109,7 +109,7 @@ class SectionBase(AppBaseModel):
     )
 
 
-class Section(SectionBase, table=True):
+class Section(AppBaseModelMixin, SectionBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     course_id: uuid.UUID = Field(
         foreign_key="course.id", index=True, ondelete="CASCADE"
@@ -127,7 +127,7 @@ class Section(SectionBase, table=True):
     )
 
 
-class ModuleBase(AppBaseModel):
+class ModuleBase(SQLModel):
     title: str = Field(max_length=255)
     description: Optional[str] = None
     module_type: ModuleType = Field(index=True)
@@ -141,7 +141,7 @@ class ModuleBase(AppBaseModel):
     settings: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
 
 
-class Module(ModuleBase, table=True):
+class Module(AppBaseModelMixin, ModuleBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
 
     section_id: uuid.UUID = Field(
@@ -173,7 +173,7 @@ class Module(ModuleBase, table=True):
     )
 
 
-class ModuleAttachmentBase(AppBaseModel):
+class ModuleAttachmentBase(SQLModel):
     attachment_type: AttachmentType
     file_url: str = Field(max_length=500)
     external_file_id: Optional[str] = Field(max_length=255, default=None, index=True)
@@ -182,7 +182,7 @@ class ModuleAttachmentBase(AppBaseModel):
     description: Optional[str] = None
 
 
-class ModuleAttachment(ModuleAttachmentBase, table=True):
+class ModuleAttachment(AppBaseModelMixin, ModuleAttachmentBase, table=True):
     __tablename__: str = "module_attachment"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -192,7 +192,7 @@ class ModuleAttachment(ModuleAttachmentBase, table=True):
     module: Module = Relationship(back_populates="attachments")
 
 
-class VideoContentBase(AppBaseModel):
+class VideoContentBase(SQLModel):
     platform: VideoPlatform
     external_video_id: str = Field(max_length=255, index=True)
     video_url: str = Field(max_length=500)
@@ -206,7 +206,7 @@ class VideoContentBase(AppBaseModel):
 
 
 # Content-specific models
-class VideoContent(VideoContentBase, table=True):
+class VideoContent(AppBaseModelMixin, VideoContentBase, table=True):
     __tablename__: str = "video_content"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -218,7 +218,7 @@ class VideoContent(VideoContentBase, table=True):
     module: Module = Relationship(back_populates="video_content")
 
 
-class DocumentBase(AppBaseModel):
+class DocumentBase(SQLModel):
     platform: DocumentPlatform
     external_file_id: Optional[str] = Field(max_length=255, default=None, index=True)
     file_url: str = Field(max_length=500)
@@ -231,7 +231,7 @@ class DocumentBase(AppBaseModel):
     )
 
 
-class DocumentContent(DocumentBase, table=True):
+class DocumentContent(AppBaseModelMixin, DocumentBase, table=True):
     __tablename__: str = "document_content"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -243,7 +243,7 @@ class DocumentContent(DocumentBase, table=True):
     module: Module = Relationship(back_populates="document_content")
 
 
-class QuizContentBase(AppBaseModel):
+class QuizContentBase(SQLModel):
     quiz_settings: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )
@@ -252,7 +252,7 @@ class QuizContentBase(AppBaseModel):
     randomize_questions: bool = Field(default=False)
 
 
-class QuizContent(QuizContentBase, table=True):
+class QuizContent(AppBaseModelMixin, QuizContentBase, table=True):
     __tablename__: str = "quiz_content"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -270,7 +270,7 @@ class QuizContent(QuizContentBase, table=True):
     )
 
 
-class QuizQuestionBase(AppBaseModel):
+class QuizQuestionBase(SQLModel):
     question_text: str
     question_type: QuestionType
     options: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
@@ -282,7 +282,7 @@ class QuizQuestionBase(AppBaseModel):
     order_index: Optional[int] = None
 
 
-class QuizQuestion(QuizQuestionBase, table=True):
+class QuizQuestion(AppBaseModelMixin, QuizQuestionBase, table=True):
     __tablename__: str = "quiz_question"
 
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
@@ -332,7 +332,7 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
         }
 
 
-class CourseProgressBase(AppBaseModel):
+class CourseProgressBase(SQLModel):
     status: ModuleProgressStatus = Field(
         default=ModuleProgressStatus.NOT_STARTED, index=True
     )
@@ -348,7 +348,7 @@ class CourseProgressBase(AppBaseModel):
     last_active_date: Optional[datetime] = None
 
 
-class CourseProgress(CourseProgressBase, table=True):
+class CourseProgress(AppBaseModelMixin, CourseProgressBase, table=True):
     __tablename__: str = "course_progress"
 
     __table_args__ = (

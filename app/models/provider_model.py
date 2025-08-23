@@ -3,23 +3,23 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import UniqueConstraint
-from sqlmodel import Field, Relationship
+from sqlmodel import Field, Relationship, SQLModel
 
 from app.common.enum import Providers
-from app.models.base import AppBaseModel
+from app.models.base import AppBaseModelMixin
 
 if TYPE_CHECKING:
     from .user_model import Account
 
 
-class ProviderBase(AppBaseModel):
+class ProviderBase(SQLModel):
     provider: Providers
     provider_id: str
     scopes: Optional[str] = None
     expires_at: Optional[datetime] = None
 
 
-class Provider(ProviderBase, table=True):
+class Provider(AppBaseModelMixin, ProviderBase, table=True):
     __table_args__ = (
         UniqueConstraint("account_id", "provider", name="uix_account_provider"),
         UniqueConstraint("provider_id", "provider", name="uix_id_provider"),

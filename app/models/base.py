@@ -1,10 +1,9 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime
-from sqlmodel import Column, Field, SQLModel
+from sqlmodel import Field, SQLModel
 
 
-class AppBaseModel(SQLModel):
+class AppBaseModelMixin(SQLModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(tz=timezone.utc),
     )

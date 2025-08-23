@@ -1,6 +1,3 @@
-import json
-import os
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -8,12 +5,13 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.common.constants import ALLOWED_ORIGINS, SECRET_KEY
 from app.common.utils import safe_json_loads
 
-from .modules import auth
+from .modules import account, auth
 
 app = FastAPI()
 
 
 app.include_router(auth.router.router, prefix="/auth", tags=["auth"])
+app.include_router(account.router.router, prefix="/account", tags=["account"])
 
 
 assert ALLOWED_ORIGINS is not None

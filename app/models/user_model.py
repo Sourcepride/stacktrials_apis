@@ -3,9 +3,9 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Optional
 
-from sqlmodel import Field, Relationship
+from sqlmodel import Field, Relationship, SQLModel
 
-from app.models.base import AppBaseModel
+from app.models.base import AppBaseModelMixin
 
 if TYPE_CHECKING:
     from .chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from .provider_model import Provider
 
 
-class AccountBase(AppBaseModel):
+class AccountBase(SQLModel):
     email: str = Field(index=True, unique=True)
     username: Optional[str] = Field(
         index=True, unique=True, nullable=True, default=None
@@ -22,7 +22,7 @@ class AccountBase(AppBaseModel):
     is_active: bool = Field(default=True)
 
 
-class Account(AccountBase, table=True):
+class Account(AppBaseModelMixin, AccountBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     profile: Optional["Profile"] = Relationship(
         back_populates="account",
@@ -73,13 +73,13 @@ class Account(AccountBase, table=True):
     )
 
 
-class ProfileBase(AppBaseModel):
+class ProfileBase(SQLModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar: Optional[str] = None
 
 
-class Profile(ProfileBase, table=True):
+class Profile(AppBaseModelMixin, ProfileBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     account_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, unique=True, ondelete="CASCADE"

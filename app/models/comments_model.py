@@ -6,21 +6,21 @@ import uuid
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import UniqueConstraint
-from sqlmodel import Field, Relationship
+from sqlmodel import Field, Relationship, SQLModel
 
-from app.models.base import AppBaseModel
+from app.models.base import AppBaseModelMixin
 
 if TYPE_CHECKING:
     from .courses_model import Course
     from .user_model import Account
 
 
-class RatingBase(AppBaseModel):
+class RatingBase(SQLModel):
     star: int = Field(le=5, ge=1)
     message: str
 
 
-class Rating(RatingBase, table=True):
+class Rating(AppBaseModelMixin, RatingBase, table=True):
     __table_args__ = (
         UniqueConstraint("account_id", "course_id", name="uix_account_course"),
     )
@@ -49,13 +49,13 @@ class Rating(RatingBase, table=True):
         }
 
 
-class CommentBase(AppBaseModel):
+class CommentBase(SQLModel):
     message: str
     likes: int = Field(default=0)
     comment_count: int = Field(default=0)
 
 
-class Comment(CommentBase, table=True):
+class Comment(AppBaseModelMixin, CommentBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     creator_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"

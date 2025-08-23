@@ -20,7 +20,7 @@ class Token(BaseModel):
 
 
 class ProfileUpdate(ProfileBase):
-    username: Optional[str] = None
+    pass
 
 
 class ProfileInformation(ProfileBase):
