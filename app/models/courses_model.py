@@ -1,3 +1,4 @@
+import base64
 import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
@@ -31,11 +32,17 @@ if TYPE_CHECKING:
 
 
 # Core Models
+class CourseTag(AppBaseModelMixin, SQLModel, table=True):
+    __tablename__: str = "course_tags"
+
+    course_id: str = Field(foreign_key="course.id", primary_key=True)
+    tag_id: uuid.UUID = Field(foreign_key="tag.id", primary_key=True)
+
+    __table_args__ = (Index("idx_course_tags_lookup", "course_id", "tag_id"),)
 
 
 class CourseBase(SQLModel):
     title: str = Field(max_length=255, index=True, description="add course title")
-    slug: str = Field(unique=True, index=True)
     image: Optional[str] = None
     description: Optional[str] = Field(
         default=None, description="course description in full (markdown support)"
@@ -58,10 +65,6 @@ class CourseBase(SQLModel):
     enrollment_type: EnrollmentType = Field(default=EnrollmentType.OPEN)
     visibility: VisibilityType = Field(default=VisibilityType.PUBLIC)
     certification_enabled: bool = Field(default=False)
-    average_rating: float = Field(default=0.00)
-    total_rating: int = Field(default=0)
-    stars: int = Field(default=0)
-    enrollment_count: int = Field(default=0)
 
 
 class Course(AppBaseModelMixin, CourseBase, table=True):
@@ -69,12 +72,22 @@ class Course(AppBaseModelMixin, CourseBase, table=True):
         Index("ix_search_filter", "title", "status", "visibility", "enrollment_type"),
     )
 
-    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-
-    # Relationships
+    id: uuid.UUID = Field(
+        default_factory=lambda: base64.urlsafe_b64encode(
+            str(uuid.uuid4()).encode()
+        ).decode()[:7],
+        primary_key=True,
+    )
     account_id: Optional[uuid.UUID] = Field(
         foreign_key="account.id", ondelete="SET NULL"
     )
+    slug: str = Field(unique=True, index=True)
+    average_rating: float = Field(default=0.00)
+    total_rating: int = Field(default=0)
+    stars: int = Field(default=0)
+    enrollment_count: int = Field(default=0)
+    comment_count: int = Field(default=0)
+
     author: Optional["Account"] = Relationship(back_populates="courses")
     sections: list["Section"] = Relationship(
         back_populates="course", passive_deletes="all"
@@ -92,6 +105,23 @@ class Course(AppBaseModelMixin, CourseBase, table=True):
     comments: list["Comment"] = Relationship(
         back_populates="course", passive_deletes="all"
     )
+    tags: list["Tag"] = Relationship(back_populates="courses", link_model=CourseTag)
+
+
+class TagBase(SQLModel):
+    name: str = Field(
+        max_length=50,
+        index=True,
+        description="Tag name (e.g., 'python', 'machine-learning')",
+    )
+    usage_count: int = Field(
+        default=0, index=True, description="Number of times this tag is used"
+    )
+
+
+class Tag(AppBaseModelMixin, TagBase, table=True):
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    courses: list["Course"] = Relationship(back_populates="tags", link_model=CourseTag)
 
 
 class SectionBase(SQLModel):
@@ -111,9 +141,7 @@ class SectionBase(SQLModel):
 
 class Section(AppBaseModelMixin, SectionBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
-    course_id: uuid.UUID = Field(
-        foreign_key="course.id", index=True, ondelete="CASCADE"
-    )
+    course_id: str = Field(foreign_key="course.id", index=True, ondelete="CASCADE")
 
     # Relationships
     course: Course = Relationship(back_populates="sections")
@@ -317,7 +345,7 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
     account_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
-    course_id: Optional[uuid.UUID] = Field(
+    course_id: Optional[str] = Field(
         foreign_key="course.id", index=True, ondelete="SET NULL"
     )
 
@@ -359,7 +387,7 @@ class CourseProgress(AppBaseModelMixin, CourseProgressBase, table=True):
     account_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
-    course_id: Optional[uuid.UUID] = Field(
+    course_id: Optional[str] = Field(
         foreign_key="course.id", index=True, ondelete="SET NULL"
     )
 

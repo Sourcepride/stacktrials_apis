@@ -40,7 +40,7 @@ class Chat(AppBaseModelMixin, ChatBase, table=True):
     account_id: Optional[uuid.UUID] = Field(
         foreign_key="account.id", ondelete="SET NULL", index=True, default=None
     )  # User who created the chat
-    course_id: Optional[uuid.UUID] = Field(
+    course_id: Optional[str] = Field(
         foreign_key="course.id", default=None, ondelete="SET NULL"
     )  # Optional course association
 
@@ -89,14 +89,15 @@ class ChatMember(AppBaseModelMixin, ChatMemberBase, table=True):
         foreign_key="account.id", ondelete="CASCADE", index=True
     )
     last_read_message_id: Optional[uuid.UUID] = Field(
-        foreign_key="message.id", default=None
+        default=None,
     )
 
     # Relationships
     chat: Chat = Relationship(back_populates="members")
-    last_read_message: Optional["Message"] = Relationship(
-        sa_relationship_kwargs={"foreign_keys": "[ChatMember.last_read_message_id]"}
-    )
+
+    # last_read_message: Optional["Message"] = Relationship(
+    #     sa_relationship_kwargs={"foreign_keys": "[ChatMember.last_read_message_id]"},
+    # )
     account: "Account" = Relationship(back_populates="chats")
     messages: list["Message"] = Relationship(
         back_populates="sender",

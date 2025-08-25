@@ -5,13 +5,14 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.common.constants import ALLOWED_ORIGINS, SECRET_KEY
 from app.common.utils import safe_json_loads
 
-from .modules import account, auth
+from .modules import account, auth, course
 
 app = FastAPI()
 
 
 app.include_router(auth.router.router, prefix="/auth", tags=["auth"])
 app.include_router(account.router.router, prefix="/account", tags=["account"])
+app.include_router(course.router.router, prefix="/courses", tags=["courses"])
 
 
 assert ALLOWED_ORIGINS is not None

@@ -28,7 +28,7 @@ class Rating(AppBaseModelMixin, RatingBase, table=True):
     account_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
-    course_id: Optional[uuid.UUID] = Field(
+    course_id: Optional[str] = Field(
         foreign_key="course.id", index=True, default=None, ondelete="SET NULL"
     )
     comment_id: Optional[uuid.UUID] = Field(
@@ -60,9 +60,7 @@ class Comment(AppBaseModelMixin, CommentBase, table=True):
     creator_id: uuid.UUID = Field(
         foreign_key="account.id", index=True, ondelete="CASCADE"
     )
-    course_id: uuid.UUID = Field(
-        foreign_key="course.id", index=True, ondelete="CASCADE"
-    )
+    course_id: str = Field(foreign_key="course.id", index=True, ondelete="CASCADE")
     reply_to_id: Optional[uuid.UUID] = Field(
         foreign_key="comment.id", default=None
     )  # For replies

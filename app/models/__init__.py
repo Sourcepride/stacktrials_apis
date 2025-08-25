@@ -13,6 +13,8 @@ from app.models.courses_model import (
     QuizQuestion,
     Section,
     VideoContent,
+    CourseTag,
+    Tag,
 )
 from app.models.chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
 from app.models.comments_model import Comment, Rating

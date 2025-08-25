@@ -41,10 +41,8 @@ class ModuleType(str, Enum):
     VIDEO = "video"
     DOCUMENT = "document"
     QUIZ = "quiz"
-    ASSIGNMENT = "assignment"
     DISCUSSION = "discussion"
     EXTERNAL_LINK = "external_link"
-    SIMULATION = "simulation"
 
 
 class AttachmentType(str, Enum):
@@ -129,3 +127,7 @@ class MemberStatus(str, Enum):
     LEFT = "left"
     KICKED = "kicked"
     BANNED = "banned"
+
+
+class SortCoursesBy(str, Enum):
+    MOST_ENROLLED = "most_enrolled"
