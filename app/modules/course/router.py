@@ -82,16 +82,25 @@ async def update_module():
     pass
 
 
+@router.get("/enroll")
+async def create_enrollment():
+    pass
+
+
 @router.get("/{course_id}/{slug}")
 async def course_detail():
     pass
 
 
-@router.get("/{course_id}/{slug}")
-async def course_content():
+@router.get("/{course_id}/{slug}/content/minmal")
+async def course_content(course_id: str, slug: str, session: SessionDep):
+    # open to everyone
     pass
 
 
-@router.get("/{course_id}/{slug}")
-async def enroll():
+@router.get("/{course_id}/{slug}/content/full")
+async def full_course_content(
+    course_id: str, slug: str, session: SessionDep, curren_user: CurrentActiveUser
+):
+    # user must have enrolled first
     pass

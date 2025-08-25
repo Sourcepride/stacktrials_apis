@@ -72,7 +72,7 @@ class Course(AppBaseModelMixin, CourseBase, table=True):
         Index("ix_search_filter", "title", "status", "visibility", "enrollment_type"),
     )
 
-    id: uuid.UUID = Field(
+    id: str = Field(
         default_factory=lambda: base64.urlsafe_b64encode(
             str(uuid.uuid4()).encode()
         ).decode()[:7],
@@ -323,15 +323,7 @@ class QuizQuestion(AppBaseModelMixin, QuizQuestionBase, table=True):
 
 
 class CourseEnrollmentBase(SQLModel):
-    enrollment_date: datetime = Field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
-    )
-    completion_date: Optional[datetime] = None
     status: EnrollmentStatus = Field(default=EnrollmentStatus.ACTIVE, index=True)
-    progress_percentage: float = Field(default=0.0, ge=0, le=100)
-    last_accessed: datetime = Field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
-    )
 
 
 # Progress tracking models
@@ -347,6 +339,14 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
     )
     course_id: Optional[str] = Field(
         foreign_key="course.id", index=True, ondelete="SET NULL"
+    )
+    enrollment_date: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
+    )
+    completion_date: Optional[datetime] = None
+    progress_percentage: float = Field(default=0.0, ge=0, le=100)
+    last_accessed: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
     )
 
     # Relationships

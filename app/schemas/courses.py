@@ -140,7 +140,6 @@ class CourseRatingRead(RatingBase):
 
 
 class CourseRatingCreate(RatingBase):
-    account_id: uuid.UUID
     course_id: str
     comment_id: str
 
@@ -158,4 +157,4 @@ class CourseCommentRead(CommentBase):
 class CourseCommentCreate(CommentBase):
     creator_id: uuid.UUID
     course_id: str
-    reply_to_id: uuid.UUID
+    reply_to_id: Optional[uuid.UUID] = None

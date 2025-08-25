@@ -1,4 +1,6 @@
 import uuid
+from datetime import datetime, timezone
+from email import message
 
 from fastapi import HTTPException, status
 from sqlalchemy import String
@@ -9,13 +11,17 @@ from app.common.enum import (
     CourseStatus,
     DifficultyLevel,
     EnrollmentType,
+    ModuleProgressStatus,
     ModuleType,
     SortCoursesBy,
     VisibilityType,
 )
 from app.common.utils import paginate, slugify
+from app.models.comments_model import Comment, Rating
 from app.models.courses_model import (
     Course,
+    CourseEnrollment,
+    CourseProgress,
     CourseTag,
     DocumentContent,
     Module,
@@ -26,7 +32,10 @@ from app.models.courses_model import (
 )
 from app.models.user_model import Account
 from app.schemas.courses import (
+    CourseCommentCreate,
     CourseCreate,
+    CourseEnrollmentCreate,
+    CourseRatingCreate,
     DocumentContentCreate,
     ModuleAttachmentCreate,
     ModuleCreate,
@@ -237,8 +246,130 @@ class CourseService:
         session.commit()
 
     @staticmethod
-    async def course_enrollment():
-        pass
+    async def create_enrollment(
+        session: Session,
+        data: CourseEnrollmentCreate,
+        current_user: Account,
+    ):
+
+        course = session.get(Course, data.course_id)
+
+        if not course:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
+            )
+
+        cleaned_data = data.model_dump(exclude_unset=True)
+        enrollment = CourseEnrollment(**cleaned_data)
+        enrollment.account_id = current_user.id
+
+        progress = CourseProgress(
+            account_id=current_user.id,
+            course_id=course.id,
+            start_time=datetime.now(timezone.utc),
+            status=ModuleProgressStatus.IN_PROGRESS,
+            last_active_date=datetime.now(timezone.utc),
+        )
+
+        session.add(enrollment)
+        session.add(progress)
+        session.commit()
+        session.refresh(enrollment)
+
+        return enrollment
+
+    @staticmethod
+    async def create_course_rating(
+        session: Session,
+        data: CourseRatingCreate,
+        current_user: Account,
+    ):
+        course = session.get(Course, data.course_id)
+
+        if not course:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
+            )
+
+        enrollment = session.exec(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == data.course_id,
+                CourseEnrollment.account_id == current_user.id,
+            )
+        ).first()
+
+        if not enrollment:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot rate a course you have not enrolled for",
+            )
+
+        cleaned_data = data.model_dump(exclude_unset=True)
+        rating = Rating(**cleaned_data)
+        rating.account_id = current_user.id
+
+        session.add(rating)
+        session.commit()
+        session.refresh(rating)
+
+        return rating
+
+    @staticmethod
+    async def create_comment(
+        session: Session,
+        data: CourseCommentCreate,
+        current_user: Account,
+    ):
+        course = session.get(Course, data.course_id)
+
+        if not course:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
+            )
+
+        if not data.reply_to_id:
+            comment = Comment(**data.model_dump(exclude_unset=True))
+            comment.creator_id = current_user.id
+            session.add(comment)
+            session.commit()
+            session.refresh(comment)
+            return comment
+
+        """
+            course_id
+            reply_to
+                -  get the comment 
+                    if it a reply_to take the id of that reply_to
+
+            course
+                - comment A
+                    -  comment B 
+                    -  comment C  [mention_id  @comment B ]  
+        """
+
+        comment_replied = session.get(Comment, data.reply_to_id)
+
+        if not comment_replied:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="comment not found"
+            )
+
+        reply_to_id = (
+            comment_replied.reply_to_id
+            if comment_replied.reply_to_id
+            else comment_replied.id
+        )
+
+        comment = Comment(**data.model_dump(exclude_unset=True))
+        comment.mention_id = comment_replied.creator_id
+        comment.creator_id = current_user.id
+        comment.reply_to_id = reply_to_id
+
+        session.add(comment)
+        session.commit()
+        session.refresh(comment)
+
+        return comment
 
     @staticmethod
     async def add_tag_to_course():
