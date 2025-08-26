@@ -2,6 +2,8 @@ import uuid
 from ast import List
 from typing import Optional
 
+from pydantic import BaseModel
+
 from app.models.comments_model import CommentBase, Rating, RatingBase
 from app.models.courses_model import (
     CourseBase,
@@ -139,6 +141,10 @@ class CourseRatingRead(RatingBase):
     comment_id: str
 
 
+class PaginatedRatings(PaginatedSchema):
+    items: list[CourseRatingRead]
+
+
 class CourseRatingCreate(RatingBase):
     course_id: str
     comment_id: str
@@ -154,7 +160,15 @@ class CourseCommentRead(CommentBase):
     mention: Optional[Account] = None
 
 
+class PaginatedComments(PaginatedSchema):
+    items: list[CourseCommentRead]
+
+
 class CourseCommentCreate(CommentBase):
     creator_id: uuid.UUID
     course_id: str
     reply_to_id: Optional[uuid.UUID] = None
+
+
+class CreateAttacment(BaseModel):
+    data: list[ModuleAttachmentCreate]

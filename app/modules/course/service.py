@@ -57,7 +57,7 @@ class CourseService:
     ):
 
         base_query = select(Course).where(
-            Course.status == CourseStatus.PUBLISHED,
+            # Course.status == CourseStatus.PUBLISHED,
             Course.visibility == VisibilityType.PUBLIC,
             Course.enrollment_type == EnrollmentType.OPEN,
         )
@@ -119,7 +119,7 @@ class CourseService:
         orignal_slug = slugify(cleaned_data.get("title", ""))
         slug = orignal_slug
 
-        while session.exec(select(Course).where(Course.slug == slug)):
+        while bool(session.exec(select(Course).where(Course.slug == slug)).first()):
             counter += 1
             slug = orignal_slug + f"-{counter}"
 
@@ -254,6 +254,8 @@ class CourseService:
 
         course = session.get(Course, data.course_id)
 
+        # TODO: before enrollment check for criteria like pay for paid courses
+
         if not course:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
@@ -307,6 +309,19 @@ class CourseService:
         cleaned_data = data.model_dump(exclude_unset=True)
         rating = Rating(**cleaned_data)
         rating.account_id = current_user.id
+        # this is to support replies
+        comment = Comment(
+            message=data.message,
+            is_rating=True,
+            course_id=data.comment_id,
+            creator_id=current_user.id,
+        )
+
+        session.add(comment)
+        session.commit()
+        session.refresh(comment)
+
+        rating.comment_id = comment.id
 
         session.add(rating)
         session.commit()
@@ -329,6 +344,7 @@ class CourseService:
 
         if not data.reply_to_id:
             comment = Comment(**data.model_dump(exclude_unset=True))
+            comment.is_rating = False
             comment.creator_id = current_user.id
             session.add(comment)
             session.commit()
@@ -361,6 +377,9 @@ class CourseService:
         )
 
         comment = Comment(**data.model_dump(exclude_unset=True))
+        comment.is_rating = (
+            comment_replied.is_rating
+        )  # replies to ratings are ratings comments
         comment.mention_id = comment_replied.creator_id
         comment.creator_id = current_user.id
         comment.reply_to_id = reply_to_id

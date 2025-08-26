@@ -53,6 +53,7 @@ class CommentBase(SQLModel):
     message: str
     likes: int = Field(default=0)
     comment_count: int = Field(default=0)
+    is_rating: bool = Field(default=False)
 
 
 class Comment(AppBaseModelMixin, CommentBase, table=True):
