@@ -1,11 +1,8 @@
 import uuid
-from ast import mod
 from datetime import datetime, timezone
-from email import message
 
 from fastapi import HTTPException, status
-from sqlalchemy import String
-from sqlmodel import Session, cast, col, desc, select
+from sqlmodel import Session, asc, col, desc, select
 
 from app.common.constants import PER_PAGE
 from app.common.enum import (
@@ -18,6 +15,7 @@ from app.common.enum import (
     VisibilityType,
 )
 from app.common.utils import paginate, slugify
+from app.core.dependencies import CurrentActiveUser
 from app.models.comments_model import Comment, Rating
 from app.models.courses_model import (
     Course,
@@ -158,6 +156,45 @@ class CourseService:
         session.commit()
         session.refresh(course)
         return course
+
+    @staticmethod
+    async def course_detail(session: Session, id: str, slug: str):
+        course = CourseService._get_course_or_404(id, slug, session)
+
+        return course
+
+    @staticmethod
+    async def course_content(session: Session, id: str, slug: str):
+        course = CourseService._get_course_or_404(id, slug, session)
+        sections = session.exec(
+            select(Section)
+            .where(Section.course_id == course.id)
+            .order_by(asc(Section.order_index))
+        ).all()
+
+        return {**course.model_dump(), sections: sections}
+
+    @staticmethod
+    async def course_content_full(
+        session: Session, id: str, slug: str, current_user: Account
+    ):
+        course = CourseService._get_course_or_404(id, slug, session)
+        course_enrollment = session.exec(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == id,
+                CourseEnrollment.account_id == current_user.id,
+            )
+        ).first()
+
+        if not course_enrollment:
+            raise HTTPException(403, "you can only access courses you enrolled for")
+        sections = session.exec(
+            select(Section)
+            .where(Section.course_id == course.id)
+            .order_by(asc(Section.order_index))
+        ).all()
+
+        return {**course.model_dump(), sections: sections}
 
     @staticmethod
     async def create_section(
@@ -569,6 +606,15 @@ class CourseService:
         return rating
 
     @staticmethod
+    async def list_ratings(
+        course_id: str, session: Session, page: int = 1, per_page: int = PER_PAGE
+    ):
+
+        query = select(Rating).join(Comment).where(Rating.course_id == course_id)
+
+        return paginate(session, query, page, per_page)
+
+    @staticmethod
     async def create_comment(
         session: Session,
         data: CourseCommentCreate,
@@ -669,6 +715,16 @@ class CourseService:
         session.commit()
         session.refresh(comment)
         return comment
+
+    @staticmethod
+    async def list_comments(
+        course_id: str, session: Session, page: int = 1, per_page: int = PER_PAGE
+    ):
+        query = select(Comment).where(
+            Comment.course_id == course_id, Comment.is_rating == False
+        )
+
+        return paginate(session, query, page, per_page)
 
     @staticmethod
     async def add_tag_to_course():

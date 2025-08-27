@@ -1,3 +1,5 @@
+from calendar import c
+
 from fastapi import APIRouter, Body, Query
 from fastapi.background import P
 from typing_extensions import Annotated
@@ -9,6 +11,8 @@ from app.schemas.courses import (
     CourseCommentCreate,
     CourseCommentRead,
     CourseCommentUpdate,
+    CourseContentReadFull,
+    CourseContentReadMin,
     CourseCreate,
     CourseEnrollmentCreate,
     CourseEnrollmentRead,
@@ -243,22 +247,18 @@ async def update_comment(
     return await CourseService.update_comment(session, id, data, current_user)
 
 
-@router.get("/{course_id}/{slug}/ratings", response_model=PaginatedRatings)
+@router.get("/{course_id}/ratings", response_model=PaginatedRatings)
 async def list_ratings(
-    course_id: str,
-    slug: str,
-    session: SessionDep,
+    course_id: str, session: SessionDep, page: Annotated[int | None, Query()] = None
 ):
-    return
+    return await CourseService.list_ratings(course_id, session, page or 1)
 
 
-@router.get("/{course_id}/{slug}/comments", response_model=PaginatedComments)
+@router.get("/{course_id}/comments", response_model=PaginatedComments)
 async def list_comments(
-    course_id: str,
-    slug: str,
-    session: SessionDep,
+    course_id: str, session: SessionDep, page: Annotated[int | None, Query()] = None
 ):
-    return
+    return await CourseService.list_comments(course_id, session, page or 1)
 
 
 @router.get("/{course_id}/{slug}")
@@ -279,20 +279,22 @@ async def update_course(
     )
 
 
-@router.delete("/{course_id}/{course_slug}", status_code=204)
-async def delete_course(course_id: str, course_slug: str):
-    pass
+@router.delete("/{course_id}/{course_slug}", status_code=204, response_model=CourseRead)
+async def delete_course(course_id: str, course_slug: str, session: SessionDep):
+    return await CourseService.course_detail(session, course_id, course_slug)
 
 
-@router.get("/{course_id}/{slug}/content/minmal")
+@router.get("/{course_id}/{slug}/content/minmal", response_model=CourseContentReadMin)
 async def course_content(course_id: str, slug: str, session: SessionDep):
     # open to everyone
-    pass
+    return await CourseService.course_content(session, course_id, slug)
 
 
-@router.get("/{course_id}/{slug}/content/full")
+@router.get("/{course_id}/{slug}/content/full", response_model=CourseContentReadFull)
 async def full_course_content(
     course_id: str, slug: str, session: SessionDep, curren_user: CurrentActiveUser
 ):
     # user must have enrolled first
-    pass
+    return await CourseService.course_content_full(
+        session, course_id, slug, curren_user
+    )

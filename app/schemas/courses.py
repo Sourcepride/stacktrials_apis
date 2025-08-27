@@ -94,7 +94,7 @@ class ModuleReadMin(ModuleBase):
 class ModuleRead(ModuleBase):
     id: uuid.UUID
     section_id: uuid.UUID
-    video_content: Optional["VideoContentRead"]
+    video_content: Optional["VideoContentRead"] = None
     document_content: Optional["DocumentContentRead"] = None
     quiz_content: Optional["QuizContent"] = None
     attachments: list["ModuleAttachmentRead"]
@@ -167,6 +167,7 @@ class CourseRatingRead(RatingBase):
     account_id: uuid.UUID
     course_id: str
     comment_id: str
+    comment: Optional["CourseCommentRead"] = None
 
 
 class PaginatedRatings(PaginatedSchema):
@@ -204,3 +205,19 @@ class CourseCommentUpdate(CommentBase):
 
 class CreateAttacment(BaseModel):
     data: list[ModuleAttachmentCreate]
+
+
+class SectionContentReadMin(SectionRead):
+    module: Optional[ModuleReadMin] = None
+
+
+class CourseContentReadMin(CourseRead):
+    sections: list[SectionRead]
+
+
+class SectionContentReadFull(SectionRead):
+    module: Optional[ModuleRead] = None
+
+
+class CourseContentReadFull(CourseContentReadMin):
+    pass

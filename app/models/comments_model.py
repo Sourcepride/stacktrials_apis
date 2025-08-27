@@ -37,6 +37,10 @@ class Rating(AppBaseModelMixin, RatingBase, table=True):
 
     course: Optional["Course"] = Relationship(back_populates="ratings")
     account: "Account" = Relationship(back_populates="ratings")
+    comment: "Comment" = Relationship(
+        back_populates="rating",
+        sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
+    )
 
     # unique constraint
     class Config:
@@ -85,3 +89,5 @@ class Comment(AppBaseModelMixin, CommentBase, table=True):
     replies: list["Comment"] = Relationship(
         sa_relationship_kwargs={"remote_side": "Comment.reply_to_id"}
     )
+
+    rating: "Rating" = Relationship(back_populates="comment")
