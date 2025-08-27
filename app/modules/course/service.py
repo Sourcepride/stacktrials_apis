@@ -63,7 +63,7 @@ class CourseService:
     ):
 
         base_query = select(Course).where(
-            # Course.status == CourseStatus.PUBLISHED,
+            Course.status == CourseStatus.PUBLISHED,
             Course.visibility == VisibilityType.PUBLIC,
             Course.enrollment_type == EnrollmentType.OPEN,
         )
@@ -94,6 +94,8 @@ class CourseService:
             .join(Tag)
             .where(
                 col(Tag.name).in_(tag.lower()),
+                Course.status == CourseStatus.PUBLISHED,
+                Course.visibility == VisibilityType.PUBLIC,
             )
             .distinct()  # Remove duplicates if course has multiple matching tags
         )
@@ -106,11 +108,18 @@ class CourseService:
         page: int = 1,
         per_page: int = PER_PAGE,
     ):
-        statement = select(Course).order_by(
-            desc(Course.average_rating),
-            desc(Course.comment_count),
-            desc(Course.enrollment_count),
-            desc(Course.created_at),
+        statement = (
+            select(Course)
+            .where(
+                Course.status == CourseStatus.PUBLISHED,
+                Course.visibility == VisibilityType.PUBLIC,
+            )
+            .order_by(
+                desc(Course.average_rating),
+                desc(Course.comment_count),
+                desc(Course.enrollment_count),
+                desc(Course.created_at),
+            )
         )
 
         return paginate(session, statement, page, per_page)
@@ -166,13 +175,7 @@ class CourseService:
     @staticmethod
     async def course_content(session: Session, id: str, slug: str):
         course = CourseService._get_course_or_404(id, slug, session)
-        sections = session.exec(
-            select(Section)
-            .where(Section.course_id == course.id)
-            .order_by(asc(Section.order_index))
-        ).all()
-
-        return {**course.model_dump(), sections: sections}
+        return course
 
     @staticmethod
     async def course_content_full(
@@ -186,15 +189,10 @@ class CourseService:
             )
         ).first()
 
-        if not course_enrollment:
+        if not course_enrollment and course.account_id != current_user.id:
             raise HTTPException(403, "you can only access courses you enrolled for")
-        sections = session.exec(
-            select(Section)
-            .where(Section.course_id == course.id)
-            .order_by(asc(Section.order_index))
-        ).all()
 
-        return {**course.model_dump(), sections: sections}
+        return course
 
     @staticmethod
     async def create_section(

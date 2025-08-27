@@ -261,9 +261,9 @@ async def list_comments(
     return await CourseService.list_comments(course_id, session, page or 1)
 
 
-@router.get("/{course_id}/{slug}")
-async def course_detail(course_id: str, slug: str):
-    pass
+@router.get("/{course_id}/{slug}", response_model=CourseRead)
+async def course_detail(course_id: str, slug: str, session: SessionDep):
+    return await CourseService.course_detail(session, course_id, slug)
 
 
 @router.patch("/{course_id}/{course_slug}", response_model=CourseRead)
@@ -279,9 +279,9 @@ async def update_course(
     )
 
 
-@router.delete("/{course_id}/{course_slug}", status_code=204, response_model=CourseRead)
+@router.delete("/{course_id}/{course_slug}", status_code=204)
 async def delete_course(course_id: str, course_slug: str, session: SessionDep):
-    return await CourseService.course_detail(session, course_id, course_slug)
+    return
 
 
 @router.get("/{course_id}/{slug}/content/minmal", response_model=CourseContentReadMin)

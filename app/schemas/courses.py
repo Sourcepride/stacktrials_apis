@@ -1,11 +1,10 @@
 import uuid
-from ast import List
-from types import ModuleType
 from typing import Optional
 
 from pydantic import BaseModel
 
-from app.models.comments_model import CommentBase, Rating, RatingBase
+from app.common.enum import ModuleType
+from app.models.comments_model import CommentBase, RatingBase
 from app.models.courses_model import (
     CourseBase,
     CourseEnrollmentBase,
@@ -208,15 +207,15 @@ class CreateAttacment(BaseModel):
 
 
 class SectionContentReadMin(SectionRead):
-    module: Optional[ModuleReadMin] = None
+    modules: list[ModuleReadMin]
 
 
 class CourseContentReadMin(CourseRead):
-    sections: list[SectionRead]
+    sections: list[SectionContentReadMin]
 
 
 class SectionContentReadFull(SectionRead):
-    module: Optional[ModuleRead] = None
+    modules: list[ModuleRead]
 
 
 class CourseContentReadFull(CourseContentReadMin):
