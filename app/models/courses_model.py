@@ -158,7 +158,7 @@ class Section(AppBaseModelMixin, SectionBase, table=True):
 class ModuleBase(SQLModel):
     title: str = Field(max_length=255)
     description: Optional[str] = None
-    module_type: ModuleType = Field(index=True)
+
     content_data: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )
@@ -193,6 +193,7 @@ class Module(AppBaseModelMixin, ModuleBase, table=True):
     attachments: list["ModuleAttachment"] = Relationship(
         back_populates="module", passive_deletes="all"
     )
+    module_type: ModuleType = Field(index=True)
 
     # 💡 Composite index for ordering
     __table_args__ = (

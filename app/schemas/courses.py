@@ -1,5 +1,6 @@
 import uuid
 from ast import List
+from types import ModuleType
 from typing import Optional
 
 from pydantic import BaseModel
@@ -42,6 +43,10 @@ class CourseCreate(CourseBase):
     tags: list[str] = []
 
 
+class CourseUpdate(CourseBase):
+    pass
+
+
 class SectionRead(SectionBase):
     id: uuid.UUID
     course_id: str
@@ -49,6 +54,10 @@ class SectionRead(SectionBase):
 
 class SectionCreate(SectionBase):
     course_id: str
+
+
+class SectionUpdate(SectionBase):
+    pass
 
 
 class VideoContentRead(VideoContentBase):
@@ -77,6 +86,11 @@ class ModuleAttachmentRead(ModuleAttachmentBase):
     module_id: uuid.UUID
 
 
+class ModuleReadMin(ModuleBase):
+    id: uuid.UUID
+    section_id: uuid.UUID
+
+
 class ModuleRead(ModuleBase):
     id: uuid.UUID
     section_id: uuid.UUID
@@ -84,19 +98,33 @@ class ModuleRead(ModuleBase):
     document_content: Optional["DocumentContentRead"] = None
     quiz_content: Optional["QuizContent"] = None
     attachments: list["ModuleAttachmentRead"]
+    module_type: ModuleType
 
 
 class ModuleCreate(ModuleBase):
     section_id: uuid.UUID
+    module_type: ModuleType
+
+
+class ModuleUpdate(ModuleBase):
+    pass
 
 
 class VideoContentCreate(VideoContentBase):
     module_id: uuid.UUID
 
 
+class VideoContentUpdate(VideoContentBase):
+    pass
+
+
 class DocumentContentCreate(DocumentBase):
 
     module_id: uuid.UUID
+
+
+class DocumentContentUpdate(DocumentBase):
+    pass
 
 
 class QuizContentCreate(QuizContentBase):
@@ -168,6 +196,10 @@ class CourseCommentCreate(CommentBase):
     creator_id: uuid.UUID
     course_id: str
     reply_to_id: Optional[uuid.UUID] = None
+
+
+class CourseCommentUpdate(CommentBase):
+    pass
 
 
 class CreateAttacment(BaseModel):
