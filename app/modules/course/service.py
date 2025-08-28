@@ -327,7 +327,7 @@ class CourseService:
             )
 
         cleaned_data = data.model_dump(exclude_unset=True)
-        module.sqlmodel_update(**cleaned_data)
+        module.sqlmodel_update(cleaned_data)
 
         session.add(module)
         session.commit()
@@ -399,7 +399,7 @@ class CourseService:
         )
 
         cleaned_data = data.model_dump(exclude_unset=True)
-        video.sqlmodel_update(**cleaned_data)
+        video.sqlmodel_update(cleaned_data)
 
         session.add(video)
         session.commit()
@@ -455,7 +455,7 @@ class CourseService:
         )
 
         cleaned_data = data.model_dump(exclude_unset=True)
-        doc.sqlmodel_update(**cleaned_data)
+        doc.sqlmodel_update(cleaned_data)
 
         session.add(doc)
         session.commit()
@@ -587,7 +587,7 @@ class CourseService:
         comment = Comment(
             message=data.message,
             is_rating=True,
-            course_id=data.comment_id,
+            course_id=data.course_id,
             creator_id=current_user.id,
         )
 

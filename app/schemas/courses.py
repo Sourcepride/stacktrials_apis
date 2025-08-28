@@ -3,7 +3,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 
-from app.common.enum import ModuleType
+from app.common.enum import ModuleType, ProgressionType
 from app.models.comments_model import CommentBase, RatingBase
 from app.models.courses_model import (
     CourseBase,
@@ -56,7 +56,10 @@ class SectionCreate(SectionBase):
 
 
 class SectionUpdate(SectionBase):
-    pass
+    title: Optional[str] = None
+    order_index: Optional[int] = None
+    is_optional: Optional[bool] = None
+    progression_type: Optional[ProgressionType] = None
 
 
 class VideoContentRead(VideoContentBase):
@@ -106,7 +109,9 @@ class ModuleCreate(ModuleBase):
 
 
 class ModuleUpdate(ModuleBase):
-    pass
+    title: Optional[str] = None
+    order_index: Optional[int] = None
+    is_required: Optional[bool] = None
 
 
 class VideoContentCreate(VideoContentBase):
@@ -165,7 +170,7 @@ class CourseRatingRead(RatingBase):
     id: uuid.UUID
     account_id: uuid.UUID
     course_id: str
-    comment_id: str
+    comment_id: Optional[uuid.UUID]
     comment: Optional["CourseCommentRead"] = None
 
 
@@ -175,15 +180,14 @@ class PaginatedRatings(PaginatedSchema):
 
 class CourseRatingCreate(RatingBase):
     course_id: str
-    comment_id: str
 
 
 class CourseCommentRead(CommentBase):
     id: uuid.UUID
     creator_id: uuid.UUID
     course_id: str
-    reply_to_id: uuid.UUID
-    mention_id: uuid.UUID
+    reply_to_id: Optional[uuid.UUID]
+    mention_id: Optional[uuid.UUID]
     reply_to: Optional[CommentBase] = None
     mention: Optional[Account] = None
 
@@ -193,7 +197,6 @@ class PaginatedComments(PaginatedSchema):
 
 
 class CourseCommentCreate(CommentBase):
-    creator_id: uuid.UUID
     course_id: str
     reply_to_id: Optional[uuid.UUID] = None
 
@@ -219,4 +222,4 @@ class SectionContentReadFull(SectionRead):
 
 
 class CourseContentReadFull(CourseContentReadMin):
-    pass
+    sections: list[SectionContentReadFull]

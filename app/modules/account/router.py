@@ -16,21 +16,6 @@ from app.schemas.base import OkModel
 router = APIRouter()
 
 
-@router.get("/{u}", response_model=ProfileInformation)
-async def profile(u: str, session: SessionDep):
-    return await get_profile(u, session)
-
-
-@router.patch("/{u}", response_model=ProfileInformation)
-async def update_profile(
-    u: str,
-    current_user: CurrentActiveUser,
-    data: Annotated[ProfileUpdate, Body()],
-    session: SessionDep,
-):
-    return await update_current_profile(u, current_user, data, session)
-
-
 @router.patch("/username", response_model=OkModel)
 async def change_username(
     username: Annotated[str, Body()],
@@ -46,6 +31,21 @@ async def get_username(
     session: SessionDep,
 ):
     return await find_username(username, session)
+
+
+@router.get("/{u}", response_model=ProfileInformation)
+async def profile(u: str, session: SessionDep):
+    return await get_profile(u, session)
+
+
+@router.patch("/{u}", response_model=ProfileInformation)
+async def update_profile(
+    u: str,
+    current_user: CurrentActiveUser,
+    data: Annotated[ProfileUpdate, Body()],
+    session: SessionDep,
+):
+    return await update_current_profile(u, current_user, data, session)
 
 
 @router.delete("/{u}")
