@@ -37,7 +37,7 @@ services:
     command: >
       sh -c "
       ./wait-for-db.sh main_db:5432 -- 
-      uvicorn main:app --host 0.0.0.0 --port 8082 --reload
+      uvicorn app.main:app --host 0.0.0.0 --port 8082 --reload
       "
     depends_on:
       - main_db
