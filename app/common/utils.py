@@ -1,3 +1,4 @@
+import base64
 import json
 import random
 import re
@@ -131,3 +132,19 @@ def slugify(data: str, max_length: Optional[int] = None) -> str:
         s = s[:max_length].rstrip("-")
 
     return s or "n-a"
+
+
+def encode_state(data: dict[str, Any]) -> str:
+    """Encode state data as a base64 JSON string"""
+    json_str = json.dumps(data)
+    encoded = base64.urlsafe_b64encode(json_str.encode()).decode()
+    return encoded
+
+
+def decode_state(state: str) -> dict[str, Any]:
+    """Decode state data from base64 JSON string"""
+    try:
+        json_str = base64.urlsafe_b64decode(state.encode()).decode()
+        return json.loads(json_str)
+    except Exception:
+        return {}

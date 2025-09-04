@@ -1,9 +1,9 @@
 # Shared dependencies for routes
 
 
-from typing import Annotated
+from typing import Annotated, Optional
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import Engine
 from sqlmodel import Session
@@ -13,7 +13,7 @@ from .database import create_app_db_engine
 from .security import decode_token
 
 engine = create_app_db_engine()
-http_bearer = HTTPBearer()
+http_bearer = HTTPBearer(auto_error=False)
 
 
 def get_session():
@@ -24,8 +24,25 @@ def get_session():
 SessionDep = Annotated[Session, Depends(get_session)]
 
 
+def get_token_from_request(
+    request: Request,
+    bearer_token: Annotated[
+        Optional[HTTPAuthorizationCredentials], Depends(http_bearer)
+    ],
+):
+
+    if bearer_token and bearer_token.credentials:
+        return bearer_token.credentials
+
+    cookie_token = request.cookies.get("access_token")
+    if cookie_token:
+        return cookie_token
+
+    return ""
+
+
 def get_current_user(
-    token: Annotated[HTTPAuthorizationCredentials, Depends(http_bearer)],
+    credentials: Annotated[str, Depends(get_token_from_request)],
     session: SessionDep,
 ):
     exception = HTTPException(
@@ -34,7 +51,10 @@ def get_current_user(
         headers={"WWW-Authenticate": "Bearer"},
     )
 
-    values = decode_token(token.credentials)
+    if not credentials:
+        raise exception
+
+    values = decode_token(credentials)
     user_id = values.get("user_id")
     if not user_id:
         raise exception
