@@ -121,5 +121,5 @@ async def logout(response: Response):
         path="/",  # must match original cookie path
         domain=None,  # set if you had a domain originally
     )
-    response.delete_cookie(key="referesh_token", path="/", domain=None)
+    response.delete_cookie(key="refresh_token", path="/", domain=None)
     return {"message": "Logged out successfully"}

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from pydantic import BaseModel
@@ -32,6 +33,7 @@ class CourseRead(CourseBase):
     stars: int
     enrollment_count: int
     comment_count: int
+    updated_at: datetime
 
 
 class PaginatedCourse(PaginatedSchema):

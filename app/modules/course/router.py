@@ -50,9 +50,12 @@ async def list_courses(
         SortCoursesBy | None, Query(description="sort by (value:  most_enrolled)")
     ] = None,
     level: Annotated[DifficultyLevel | None, Query()] = None,
+    language: Annotated[str | None, Query()] = None,
     page: int | None = None,
 ):
-    return await CourseService.list_courses(q, sort, level, session, page or 1)
+    return await CourseService.list_courses(
+        q, sort, level, session, language, page or 1
+    )
 
 
 @router.get("/tags/{name}", response_model=PaginatedCourse)

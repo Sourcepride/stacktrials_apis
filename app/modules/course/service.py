@@ -58,20 +58,20 @@ class CourseService:
         sort: SortCoursesBy | None,
         level: DifficultyLevel | None,
         session: Session,
+        language: str | None,
         page: int = 1,
         per_page: int = PER_PAGE,
     ):
 
-        base_query = select(Course).where(
-            Course.status == CourseStatus.PUBLISHED,
-            Course.visibility == VisibilityType.PUBLIC,
-            Course.enrollment_type == EnrollmentType.OPEN,
-        )
+        base_query = select(Course)
         if title:
             base_query = base_query.where(col(Course.title).ilike(f"%{title}%"))
 
         if level:
             base_query = base_query.where(Course.difficulty_level == DifficultyLevel)
+
+        if language:
+            base_query = base_query.where(Course.language == language)
 
         if sort:
             base_query.order_by(desc(Course.comment_count))
@@ -237,6 +237,8 @@ class CourseService:
                 status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
             )
 
+        # TODO:  upate updated_at for course
+
         cleaned_data = data.model_dump(exclude_unset=True)
         section.sqlmodel_update(cleaned_data)
 
@@ -325,6 +327,8 @@ class CourseService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
             )
+
+        # TODO:  upate updated_at for course
 
         cleaned_data = data.model_dump(exclude_unset=True)
         module.sqlmodel_update(cleaned_data)

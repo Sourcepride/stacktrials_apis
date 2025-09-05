@@ -1,8 +1,18 @@
-from fastapi import FastAPI
+from typing import Annotated
+from urllib.parse import urlparse
+
+import httpx
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.common.constants import ALLOWED_ORIGINS, IS_DEV, SECRET_KEY
+from app.common.constants import (
+    ALLOWED_IMAGE_ORIGIN,
+    ALLOWED_ORIGINS,
+    IS_DEV,
+    SECRET_KEY,
+)
 from app.common.utils import safe_json_loads
 
 from .modules import account, auth, course
@@ -47,3 +57,41 @@ app.add_middleware(
 @app.get("/")
 async def index():
     return {"ok": True}
+
+
+# Whitelisted hostnames for external images
+ALLOWED_HOSTS = set(safe_json_loads(ALLOWED_IMAGE_ORIGIN, []))
+
+
+@app.get("/media/proxy")
+async def proxy_image(url: Annotated[str, Query(description="External image URL")]):
+    async def _fetch_image():
+        try:
+            parsed = urlparse(url)
+            if parsed.hostname not in ALLOWED_HOSTS:
+                return HTTPException(status_code=403, detail="Host not allowed")
+
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                r = await client.get(url)
+
+            if r.status_code != 200:
+                return HTTPException(
+                    status_code=r.status_code, detail="Failed to fetch image"
+                )
+
+            content_type = r.headers.get("content-type", "application/octet-stream")
+            return Response(
+                content=r.content,
+                media_type=content_type,
+                headers={"Cache-Control": "public, max-age=86400"},  # Cache for 1 day
+            )
+
+        except Exception as e:
+            raise HTTPException(
+                status_code=500, detail=f"Error fetching image: {str(e)}"
+            )
+
+    value = await _fetch_image()
+    if isinstance(value, HTTPException):
+        raise value
+    return value
