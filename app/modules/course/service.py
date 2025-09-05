@@ -63,7 +63,11 @@ class CourseService:
         per_page: int = PER_PAGE,
     ):
 
-        base_query = select(Course)
+        base_query = select(Course).where(
+            Course.status == CourseStatus.PUBLISHED,
+            Course.visibility == VisibilityType.PUBLIC,
+            Course.enrollment_type == EnrollmentType.OPEN,
+        )
         if title:
             base_query = base_query.where(col(Course.title).ilike(f"%{title}%"))
 
