@@ -48,7 +48,7 @@ class CourseBase(SQLModel):
         default=None, description="course description in full (markdown support)"
     )
     short_description: Optional[str] = Field(
-        default=None, description="a short description"
+        default=None, description="a short description", max_length=225
     )
     learning_objectives: Optional[list[str]] = Field(
         default=None,

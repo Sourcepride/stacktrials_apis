@@ -131,3 +131,5 @@ class MemberStatus(str, Enum):
 
 class SortCoursesBy(str, Enum):
     MOST_ENROLLED = "most_enrolled"
+    TOP_RATED = "top_rated"
+    RECENT = "recent"

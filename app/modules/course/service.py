@@ -72,13 +72,15 @@ class CourseService:
             base_query = base_query.where(col(Course.title).ilike(f"%{title}%"))
 
         if level:
-            base_query = base_query.where(Course.difficulty_level == DifficultyLevel)
+            base_query = base_query.where(Course.difficulty_level == level)
 
         if language:
             base_query = base_query.where(Course.language == language)
 
-        if sort:
+        if sort == SortCoursesBy.MOST_ENROLLED:
             base_query.order_by(desc(Course.comment_count))
+        elif sort == SortCoursesBy.TOP_RATED:
+            base_query.order_by(desc(Course.average_rating))
         else:
             base_query.order_by(desc(Course.created_at))
 
