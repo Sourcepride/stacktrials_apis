@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime, timezone
+from typing import cast
 
 from fastapi import HTTPException, status
-from sqlmodel import Session, asc, col, desc, select
+from sqlalchemy import BinaryExpression, text
+from sqlmodel import Session, asc, col, desc, func, select, update
 
 from app.common.constants import PER_PAGE
 from app.common.enum import (
@@ -149,9 +151,9 @@ class CourseService:
 
     @staticmethod
     async def update_course(
-        session: Session, id: str, slug: str, data: CourseUpdate, current_user: Account
+        session: Session, slug: str, data: CourseUpdate, current_user: Account
     ):
-        course = CourseService._get_course_or_404(id, slug, session)
+        course = CourseService._get_course_or_404(slug, session)
 
         if course.account_id != current_user.id:
             raise HTTPException(
@@ -173,24 +175,22 @@ class CourseService:
         return course
 
     @staticmethod
-    async def course_detail(session: Session, id: str, slug: str):
-        course = CourseService._get_course_or_404(id, slug, session)
+    async def course_detail(session: Session, slug: str):
+        course = CourseService._get_course_or_404(slug, session)
 
         return course
 
     @staticmethod
-    async def course_content(session: Session, id: str, slug: str):
-        course = CourseService._get_course_or_404(id, slug, session)
+    async def course_content(session: Session, slug: str):
+        course = CourseService._get_course_or_404(slug, session)
         return course
 
     @staticmethod
-    async def course_content_full(
-        session: Session, id: str, slug: str, current_user: Account
-    ):
-        course = CourseService._get_course_or_404(id, slug, session)
+    async def course_content_full(session: Session, slug: str, current_user: Account):
+        course = CourseService._get_course_or_404(slug, session)
         course_enrollment = session.exec(
             select(CourseEnrollment).where(
-                CourseEnrollment.course_id == id,
+                CourseEnrollment.course_id == course.id,
                 CourseEnrollment.account_id == current_user.id,
             )
         ).first()
@@ -545,24 +545,41 @@ class CourseService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
             )
 
-        cleaned_data = data.model_dump(exclude_unset=True)
-        enrollment = CourseEnrollment(**cleaned_data)
-        enrollment.account_id = current_user.id
+        try:
+            with session.begin():
+                cleaned_data = data.model_dump(exclude_unset=True)
+                enrollment = CourseEnrollment(**cleaned_data)
+                enrollment.account_id = current_user.id
 
-        progress = CourseProgress(
-            account_id=current_user.id,
-            course_id=course.id,
-            start_time=datetime.now(timezone.utc),
-            status=ModuleProgressStatus.IN_PROGRESS,
-            last_active_date=datetime.now(timezone.utc),
-        )
+                session.add(enrollment)
+                session.flush()
 
-        session.add(enrollment)
-        session.add(progress)
-        session.commit()
-        session.refresh(enrollment)
+                progress = CourseProgress(
+                    account_id=current_user.id,
+                    course_id=course.id,
+                    start_time=datetime.now(timezone.utc),
+                    status=ModuleProgressStatus.IN_PROGRESS,
+                    last_active_date=datetime.now(timezone.utc),
+                )
 
-        return enrollment
+                session.add(progress)
+                session.flush()
+
+                update_stmt = (
+                    update(Course)
+                    .where(cast(BinaryExpression, Course.id == data.course_id))
+                    .values(
+                        enrollment_count=func.coalesce(Course.enrollment_count, 0) + 1,
+                    )
+                )
+
+                session.exec(update_stmt)  # type: ignore
+
+            session.refresh(enrollment)
+            return enrollment
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     async def create_course_rating(
@@ -571,7 +588,6 @@ class CourseService:
         current_user: Account,
     ):
         course = session.get(Course, data.course_id)
-
         if not course:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
@@ -583,35 +599,71 @@ class CourseService:
                 CourseEnrollment.account_id == current_user.id,
             )
         ).first()
-
         if not enrollment:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="You cannot rate a course you have not enrolled for",
             )
 
-        cleaned_data = data.model_dump(exclude_unset=True)
-        rating = Rating(**cleaned_data)
-        rating.account_id = current_user.id
-        # this is to support replies
-        comment = Comment(
-            message=data.message,
-            is_rating=True,
-            course_id=data.course_id,
-            creator_id=current_user.id,
-        )
+        # Check if user already rated this course
+        existing_rating = session.exec(
+            select(Rating).where(
+                Rating.course_id == data.course_id,
+                Rating.account_id == current_user.id,
+            )
+        ).first()
 
-        session.add(comment)
-        session.commit()
-        session.refresh(comment)
+        if existing_rating:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You have already rated this course",
+            )
 
-        rating.comment_id = comment.id
+        try:
+            # Start transaction
+            with session.begin():
 
-        session.add(rating)
-        session.commit()
-        session.refresh(rating)
+                # Create comment first
+                comment = Comment(
+                    message=data.message,
+                    is_rating=True,
+                    course_id=data.course_id,
+                    creator_id=current_user.id,
+                )
+                session.add(comment)
+                session.flush()  # Get the comment ID without committing
 
-        return rating
+                # Create rating
+                cleaned_data = data.model_dump(exclude_unset=True)
+                rating = Rating(**cleaned_data)
+                rating.account_id = current_user.id
+                rating.comment_id = comment.id
+                session.add(rating)
+                session.flush()  # Ensure rating is created
+
+                # Atomically update course statistics using SQLModel's update
+                update_stmt = (
+                    update(Course)
+                    .where(cast(BinaryExpression, Course.id == data.course_id))
+                    .values(
+                        total_rating=func.coalesce(Course.total_rating, 0) + 1,
+                        stars=func.coalesce(Course.stars, 0) + data.star,
+                        average_rating=(func.coalesce(Course.stars, 0) + data.star)
+                        / (func.coalesce(Course.total_rating, 0) + 1),
+                    )
+                )
+
+                session.exec(update_stmt)  # type: ignore
+
+            # Refresh to get updated values
+            session.refresh(rating)
+            session.refresh(course)
+
+            return rating
+
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     async def list_ratings(
@@ -635,59 +687,84 @@ class CourseService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
             )
 
-        if not data.reply_to_id:
-            comment = Comment(**data.model_dump(exclude_unset=True))
-            comment.is_rating = False
-            comment.creator_id = current_user.id
-            session.add(comment)
-            session.commit()
+        comment_replied = None
+
+        if data.reply_to_id:
+            comment_replied = session.get(Comment, data.reply_to_id)
+
+            if not comment_replied:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="comment not found"
+                )
+
+        try:
+            with session.begin():
+                if not data.reply_to_id:
+                    comment = Comment(**data.model_dump(exclude_unset=True))
+                    comment.is_rating = False
+                    comment.creator_id = current_user.id
+                    session.add(comment)
+                    session.flush()
+                elif comment_replied:
+
+                    """
+                    course_id
+                    reply_to
+                        -  get the comment
+                            if it a reply_to take the id of that reply_to
+
+                    course
+                        - comment A
+                            -  comment B
+                            -  comment C  [mention_id  @comment B ]
+                    """
+
+                    reply_to_id = (
+                        comment_replied.reply_to_id
+                        if comment_replied.reply_to_id
+                        else comment_replied.id
+                    )
+
+                    comment = Comment(**data.model_dump(exclude_unset=True))
+                    comment.is_rating = (
+                        comment_replied.is_rating
+                    )  # replies to ratings are ratings comments
+                    comment.mention_id = comment_replied.creator_id
+                    comment.creator_id = current_user.id
+                    comment.reply_to_id = reply_to_id
+                    session.add(comment)
+                    session.flush()
+
+                    # comment_count increment
+                    upgraded_parent = session.get(Comment, reply_to_id)
+                    assert upgraded_parent is not None
+
+                    update_stmt_parent = (
+                        update(Comment)
+                        .where(cast(BinaryExpression, Comment.id == reply_to_id))
+                        .values(
+                            comment_count=func.coalesce(Comment.comment_count, 0) + 1,
+                        )
+                    )
+
+                    # increment course comment count
+                    # Atomically update course statistics using SQLModel's update
+                    update_stmt = (
+                        update(Course)
+                        .where(cast(BinaryExpression, Course.id == data.course_id))
+                        .values(
+                            comment_count=func.coalesce(Course.comment_count, 0) + 1,
+                        )
+                    )
+
+                    session.exec(update_stmt)  # type: ignore
+                    session.exec(update_stmt_parent)  # type: ignore
+
             session.refresh(comment)
             return comment
-
-        """
-            course_id
-            reply_to
-                -  get the comment 
-                    if it a reply_to take the id of that reply_to
-
-            course
-                - comment A
-                    -  comment B 
-                    -  comment C  [mention_id  @comment B ]  
-        """
-
-        comment_replied = session.get(Comment, data.reply_to_id)
-
-        if not comment_replied:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="comment not found"
-            )
-
-        reply_to_id = (
-            comment_replied.reply_to_id
-            if comment_replied.reply_to_id
-            else comment_replied.id
-        )
-
-        comment = Comment(**data.model_dump(exclude_unset=True))
-        comment.is_rating = (
-            comment_replied.is_rating
-        )  # replies to ratings are ratings comments
-        comment.mention_id = comment_replied.creator_id
-        comment.creator_id = current_user.id
-        comment.reply_to_id = reply_to_id
-
-        # comment_count increment
-        upgraded_parent = session.get(Comment, reply_to_id)
-        assert upgraded_parent is not None
-        upgraded_parent.comment_count += 1
-
-        session.add(comment)
-        session.add(upgraded_parent)
-        session.commit()
-        session.refresh(comment)
-
-        return comment
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     async def update_comment(
@@ -768,10 +845,8 @@ class CourseService:
             )
 
     @staticmethod
-    def _get_course_or_404(course_id: str, slug: str, session: Session):
-        course = session.exec(
-            select(Course).where(Course.id == course_id, Course.slug == slug)
-        ).first()
+    def _get_course_or_404(slug: str, session: Session):
+        course = session.exec(select(Course).where(Course.slug == slug)).first()
         if not course:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "course not found")
         return course

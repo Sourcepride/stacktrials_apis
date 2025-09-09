@@ -264,22 +264,18 @@ async def list_comments(
     return await CourseService.list_comments(course_id, session, page or 1)
 
 
-@router.get("/{course_id}/{slug}", response_model=CourseRead)
-async def course_detail(course_id: str, slug: str, session: SessionDep):
-    return await CourseService.course_detail(session, course_id, slug)
+@router.get("/{slug}/content/minimal", response_model=CourseContentReadMin)
+async def course_content(slug: str, session: SessionDep):
+    # open to everyone
+    return await CourseService.course_content(session, slug)
 
 
-@router.patch("/{course_id}/{course_slug}", response_model=CourseRead)
-async def update_course(
-    course_id: str,
-    course_slug: str,
-    session: SessionDep,
-    data: Annotated[CourseUpdate, Body()],
-    current_user: CurrentActiveUser,
+@router.get("/{slug}/content/full", response_model=CourseContentReadFull)
+async def full_course_content(
+    slug: str, session: SessionDep, curren_user: CurrentActiveUser
 ):
-    return await CourseService.update_course(
-        session, course_id, course_slug, data, current_user
-    )
+    # user must have enrolled first
+    return await CourseService.course_content_full(session, slug, curren_user)
 
 
 @router.delete("/{course_id}/{course_slug}", status_code=204)
@@ -287,17 +283,16 @@ async def delete_course(course_id: str, course_slug: str, session: SessionDep):
     return
 
 
-@router.get("/{course_id}/{slug}/content/minmal", response_model=CourseContentReadMin)
-async def course_content(course_id: str, slug: str, session: SessionDep):
-    # open to everyone
-    return await CourseService.course_content(session, course_id, slug)
+@router.get("/{slug}", response_model=CourseRead)
+async def course_detail(slug: str, session: SessionDep):
+    return await CourseService.course_detail(session, slug)
 
 
-@router.get("/{course_id}/{slug}/content/full", response_model=CourseContentReadFull)
-async def full_course_content(
-    course_id: str, slug: str, session: SessionDep, curren_user: CurrentActiveUser
+@router.patch("/{course_slug}", response_model=CourseRead)
+async def update_course(
+    course_slug: str,
+    session: SessionDep,
+    data: Annotated[CourseUpdate, Body()],
+    current_user: CurrentActiveUser,
 ):
-    # user must have enrolled first
-    return await CourseService.course_content_full(
-        session, course_id, slug, curren_user
-    )
+    return await CourseService.update_course(session, course_slug, data, current_user)
