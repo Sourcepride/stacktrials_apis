@@ -28,7 +28,7 @@ def get_token_from_request(
     request: Request,
     bearer_token: Annotated[
         Optional[HTTPAuthorizationCredentials], Depends(http_bearer)
-    ],
+    ] = None,
 ):
 
     if bearer_token and bearer_token.credentials:
@@ -67,6 +67,30 @@ def get_current_user(
     return user
 
 
+def get_current_user_silent(
+    credentials: Annotated[Optional[str], Depends(get_token_from_request)],
+    session: SessionDep,
+):
+
+    if not credentials:
+        return
+
+    values = decode_token(credentials)
+    user_id = values.get("user_id")
+    if not user_id:
+        return
+
+    user = session.get(Account, user_id)
+
+    if not user:
+        return
+
+    if not user.is_active:
+        return
+
+    return user
+
+
 def get_current_active_user(
     current_user: Annotated["Account", Depends(get_current_user)],
 ):
@@ -77,3 +101,6 @@ def get_current_active_user(
 
 
 CurrentActiveUser = Annotated["Account", Depends(get_current_active_user)]
+CurrentActiveUserSilent = Annotated[
+    Optional["Account"], Depends(get_current_user_silent)
+]

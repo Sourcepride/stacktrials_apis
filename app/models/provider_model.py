@@ -6,13 +6,13 @@ from sqlalchemy import UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.common.enum import Providers
-from app.models.base import AppBaseModelMixin
+from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
     from .user_model import Account
 
 
-class ProviderBase(SQLModel):
+class ProviderBase(AppSQLModel):
     provider: Providers
     provider_id: str
     scopes: Optional[str] = None

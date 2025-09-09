@@ -19,15 +19,6 @@ from .modules import account, auth, course
 
 app = FastAPI()
 
-version_1 = "/api/v1"
-app.include_router(auth.router.router, prefix=f"{version_1}/auth", tags=["auth"])
-app.include_router(
-    account.router.router, prefix=f"{version_1}/account", tags=["account"]
-)
-app.include_router(
-    course.router.router, prefix=f"{version_1}/courses", tags=["courses"]
-)
-
 
 assert ALLOWED_ORIGINS is not None
 assert SECRET_KEY is not None
@@ -38,7 +29,7 @@ origins = safe_json_loads(ALLOWED_ORIGINS, [])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["http://localhost:4020"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -95,3 +86,13 @@ async def proxy_image(url: Annotated[str, Query(description="External image URL"
     if isinstance(value, HTTPException):
         raise value
     return value
+
+
+version_1 = "/api/v1"
+app.include_router(auth.router.router, prefix=f"{version_1}/auth", tags=["auth"])
+app.include_router(
+    account.router.router, prefix=f"{version_1}/account", tags=["account"]
+)
+app.include_router(
+    course.router.router, prefix=f"{version_1}/courses", tags=["courses"]
+)

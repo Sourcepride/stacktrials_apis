@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import cast
+from typing import Any, Optional, cast
 
 from fastapi import HTTPException, status
 from sqlalchemy import BinaryExpression, text
@@ -18,7 +18,7 @@ from app.common.enum import (
 )
 from app.common.utils import paginate, slugify
 from app.core.dependencies import CurrentActiveUser
-from app.models.comments_model import Comment, Rating
+from app.models.comments_model import Comment, CommentLike, Rating
 from app.models.courses_model import (
     Course,
     CourseEnrollment,
@@ -35,6 +35,7 @@ from app.models.user_model import Account
 from app.modules import course
 from app.schemas.courses import (
     CourseCommentCreate,
+    CourseCommentRead,
     CourseCommentUpdate,
     CourseCreate,
     CourseEnrollmentCreate,
@@ -530,6 +531,20 @@ class CourseService:
         session.commit()
 
     @staticmethod
+    async def get_enrollment(course_id: str, session: Session, curent_user: Account):
+        enrollment = session.exec(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == course_id,
+                CourseEnrollment.account_id == curent_user.id,
+            )
+        ).first()
+
+        if not enrollment:
+            raise HTTPException(404, "not enrolled")
+
+        return enrollment
+
+    @staticmethod
     async def create_enrollment(
         session: Session,
         data: CourseEnrollmentCreate,
@@ -546,35 +561,36 @@ class CourseService:
             )
 
         try:
-            with session.begin():
-                cleaned_data = data.model_dump(exclude_unset=True)
-                enrollment = CourseEnrollment(**cleaned_data)
-                enrollment.account_id = current_user.id
 
-                session.add(enrollment)
-                session.flush()
+            cleaned_data = data.model_dump(exclude_unset=True)
+            enrollment = CourseEnrollment(**cleaned_data)
+            enrollment.account_id = current_user.id
 
-                progress = CourseProgress(
-                    account_id=current_user.id,
-                    course_id=course.id,
-                    start_time=datetime.now(timezone.utc),
-                    status=ModuleProgressStatus.IN_PROGRESS,
-                    last_active_date=datetime.now(timezone.utc),
+            session.add(enrollment)
+            session.flush()
+
+            progress = CourseProgress(
+                account_id=current_user.id,
+                course_id=course.id,
+                start_time=datetime.now(timezone.utc),
+                status=ModuleProgressStatus.IN_PROGRESS,
+                last_active_date=datetime.now(timezone.utc),
+            )
+
+            session.add(progress)
+            session.flush()
+
+            update_stmt = (
+                update(Course)
+                .where(cast(BinaryExpression, Course.id == data.course_id))
+                .values(
+                    enrollment_count=func.coalesce(Course.enrollment_count, 0) + 1,
                 )
+            )
 
-                session.add(progress)
-                session.flush()
+            session.exec(update_stmt)  # type: ignore
 
-                update_stmt = (
-                    update(Course)
-                    .where(cast(BinaryExpression, Course.id == data.course_id))
-                    .values(
-                        enrollment_count=func.coalesce(Course.enrollment_count, 0) + 1,
-                    )
-                )
-
-                session.exec(update_stmt)  # type: ignore
-
+            session.commit()
             session.refresh(enrollment)
             return enrollment
         except Exception as e:
@@ -620,40 +636,39 @@ class CourseService:
             )
 
         try:
-            # Start transaction
-            with session.begin():
 
-                # Create comment first
-                comment = Comment(
-                    message=data.message,
-                    is_rating=True,
-                    course_id=data.course_id,
-                    creator_id=current_user.id,
+            # Create comment first
+            comment = Comment(
+                message=data.message,
+                is_rating=True,
+                course_id=data.course_id,
+                creator_id=current_user.id,
+            )
+            session.add(comment)
+            session.flush()  # Get the comment ID without committing
+
+            # Create rating
+            cleaned_data = data.model_dump(exclude_unset=True)
+            rating = Rating(**cleaned_data)
+            rating.account_id = current_user.id
+            rating.comment_id = comment.id
+            session.add(rating)
+            session.flush()  # Ensure rating is created
+
+            # Atomically update course statistics using SQLModel's update
+            update_stmt = (
+                update(Course)
+                .where(cast(BinaryExpression, Course.id == data.course_id))
+                .values(
+                    total_rating=func.coalesce(Course.total_rating, 0) + 1,
+                    stars=func.coalesce(Course.stars, 0) + data.star,
+                    average_rating=(func.coalesce(Course.stars, 0) + data.star)
+                    / (func.coalesce(Course.total_rating, 0) + 1),
                 )
-                session.add(comment)
-                session.flush()  # Get the comment ID without committing
+            )
 
-                # Create rating
-                cleaned_data = data.model_dump(exclude_unset=True)
-                rating = Rating(**cleaned_data)
-                rating.account_id = current_user.id
-                rating.comment_id = comment.id
-                session.add(rating)
-                session.flush()  # Ensure rating is created
-
-                # Atomically update course statistics using SQLModel's update
-                update_stmt = (
-                    update(Course)
-                    .where(cast(BinaryExpression, Course.id == data.course_id))
-                    .values(
-                        total_rating=func.coalesce(Course.total_rating, 0) + 1,
-                        stars=func.coalesce(Course.stars, 0) + data.star,
-                        average_rating=(func.coalesce(Course.stars, 0) + data.star)
-                        / (func.coalesce(Course.total_rating, 0) + 1),
-                    )
-                )
-
-                session.exec(update_stmt)  # type: ignore
+            session.exec(update_stmt)  # type: ignore
+            session.commit()
 
             # Refresh to get updated values
             session.refresh(rating)
@@ -698,68 +713,68 @@ class CourseService:
                 )
 
         try:
-            with session.begin():
-                if not data.reply_to_id:
-                    comment = Comment(**data.model_dump(exclude_unset=True))
-                    comment.is_rating = False
-                    comment.creator_id = current_user.id
-                    session.add(comment)
-                    session.flush()
-                elif comment_replied:
 
-                    """
-                    course_id
-                    reply_to
-                        -  get the comment
-                            if it a reply_to take the id of that reply_to
+            if not data.reply_to_id:
+                comment = Comment(**data.model_dump(exclude_unset=True))
+                comment.is_rating = False
+                comment.creator_id = current_user.id
+                session.add(comment)
+                session.flush()
+            elif comment_replied:
 
-                    course
-                        - comment A
-                            -  comment B
-                            -  comment C  [mention_id  @comment B ]
-                    """
+                """
+                course_id
+                reply_to
+                    -  get the comment
+                        if it a reply_to take the id of that reply_to
 
-                    reply_to_id = (
-                        comment_replied.reply_to_id
-                        if comment_replied.reply_to_id
-                        else comment_replied.id
+                course
+                    - comment A
+                        -  comment B
+                        -  comment C  [mention_id  @comment B ]
+                """
+
+                reply_to_id = (
+                    comment_replied.reply_to_id
+                    if comment_replied.reply_to_id
+                    else comment_replied.id
+                )
+
+                comment = Comment(**data.model_dump(exclude_unset=True))
+                comment.is_rating = (
+                    comment_replied.is_rating
+                )  # replies to ratings are ratings comments
+                comment.mention_id = comment_replied.creator_id
+                comment.creator_id = current_user.id
+                comment.reply_to_id = reply_to_id
+                session.add(comment)
+                session.flush()
+
+                # comment_count increment
+                upgraded_parent = session.get(Comment, reply_to_id)
+                assert upgraded_parent is not None
+
+                update_stmt_parent = (
+                    update(Comment)
+                    .where(cast(BinaryExpression, Comment.id == reply_to_id))
+                    .values(
+                        comment_count=func.coalesce(Comment.comment_count, 0) + 1,
                     )
+                )
 
-                    comment = Comment(**data.model_dump(exclude_unset=True))
-                    comment.is_rating = (
-                        comment_replied.is_rating
-                    )  # replies to ratings are ratings comments
-                    comment.mention_id = comment_replied.creator_id
-                    comment.creator_id = current_user.id
-                    comment.reply_to_id = reply_to_id
-                    session.add(comment)
-                    session.flush()
+                session.exec(update_stmt_parent)  # type: ignore
+            # increment course comment count
+            # Atomically update course statistics using SQLModel's update
+            update_stmt = (
+                update(Course)
+                .where(cast(BinaryExpression, Course.id == data.course_id))
+                .values(
+                    comment_count=func.coalesce(Course.comment_count, 0) + 1,
+                )
+            )
 
-                    # comment_count increment
-                    upgraded_parent = session.get(Comment, reply_to_id)
-                    assert upgraded_parent is not None
-
-                    update_stmt_parent = (
-                        update(Comment)
-                        .where(cast(BinaryExpression, Comment.id == reply_to_id))
-                        .values(
-                            comment_count=func.coalesce(Comment.comment_count, 0) + 1,
-                        )
-                    )
-
-                    # increment course comment count
-                    # Atomically update course statistics using SQLModel's update
-                    update_stmt = (
-                        update(Course)
-                        .where(cast(BinaryExpression, Course.id == data.course_id))
-                        .values(
-                            comment_count=func.coalesce(Course.comment_count, 0) + 1,
-                        )
-                    )
-
-                    session.exec(update_stmt)  # type: ignore
-                    session.exec(update_stmt_parent)  # type: ignore
-
+            session.exec(update_stmt)  # type: ignore
+            session.commit()
             session.refresh(comment)
             return comment
         except Exception as e:
@@ -803,13 +818,126 @@ class CourseService:
 
     @staticmethod
     async def list_comments(
-        course_id: str, session: Session, page: int = 1, per_page: int = PER_PAGE
+        course_id: str,
+        session: Session,
+        page: int = 1,
+        current_user: Optional[Account] = None,
+        per_page: int = PER_PAGE,
     ):
-        query = select(Comment).where(
-            Comment.course_id == course_id, Comment.is_rating == False
+        query = (
+            select(Comment)
+            .where(
+                Comment.course_id == course_id,
+                Comment.is_rating == False,
+                Comment.reply_to == None,
+            )
+            .order_by(desc(Comment.created_at))
         )
 
-        return paginate(session, query, page, per_page)
+        data = paginate(session, query, page, per_page)
+
+        if current_user:
+            likes = session.exec(
+                select(CommentLike, Comment.course_id)
+                .join(CommentLike)
+                .where(
+                    Comment.course_id == course_id,
+                    CommentLike.account_id == current_user.id,
+                )
+            ).all()
+
+            like_map = {}
+            for comment_like, _ in likes:
+                like_map[comment_like.comment_id] = True
+
+            def _fill(x: Comment):
+                comment_read = CourseCommentRead.model_validate(x)
+                return comment_read.model_copy(
+                    update={"is_liked": like_map.get(x.id, False)}
+                )
+
+            data["items"] = list(map(_fill, data["items"]))
+
+        return data
+
+    @staticmethod
+    async def list_replies(
+        comment_id: str,
+        session: Session,
+        page: int = 1,
+        current_user: Optional[Account] = None,
+        per_page: int = PER_PAGE,
+    ):
+        query = (
+            select(Comment)
+            .where(Comment.reply_to_id == comment_id)
+            .order_by(desc(Comment.created_at))
+        )
+
+        data = paginate(session, query, page, per_page)
+
+        if current_user:
+            likes = session.exec(
+                select(CommentLike, Comment)
+                .join(CommentLike)
+                .where(
+                    Comment.reply_to_id == comment_id,
+                    CommentLike.account_id == current_user.id,
+                )
+            ).all()
+
+            like_map = {}
+            for comment_like, _ in likes:
+                like_map[comment_like.comment_id] = True
+
+            def _fill(x: Any):
+                comment_read = CourseCommentRead.model_validate(x)
+                return comment_read.model_copy(
+                    update={"is_liked": like_map.get(x.id, False)}
+                )
+
+            data["items"] = list(map(_fill, data["items"]))
+
+        return data
+
+    @staticmethod
+    async def like_unlike(comment_id: str, session: Session, current_user: Account):
+
+        comment = session.get(Comment, comment_id)
+
+        if not comment:
+            raise HTTPException(404, "comment not found!")
+
+        like = session.exec(
+            select(CommentLike).where(
+                CommentLike.account_id == current_user.id,
+                CommentLike.comment_id == comment_id,
+            )
+        ).first()
+
+        if like:
+            session.delete(like)
+            update_stmt = (
+                update(Comment)
+                .where(cast(BinaryExpression, Comment.id == comment_id))
+                .values(
+                    likes=func.coalesce(Comment.likes, 1) - 1,
+                )
+            )
+            session.exec(update_stmt)  # type:  ignore
+        else:
+            session.add(CommentLike(account_id=current_user.id, comment_id=comment.id))
+            update_stmt = (
+                update(Comment)
+                .where(cast(BinaryExpression, Comment.id == comment_id))
+                .values(
+                    likes=func.coalesce(Comment.likes, 0) + 1,
+                )
+            )
+            session.exec(update_stmt)  # type:  ignore
+        session.commit()
+
+        return
 
     @staticmethod
     async def add_tag_to_course():

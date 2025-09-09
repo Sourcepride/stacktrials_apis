@@ -6,4 +6,4 @@ from app.common.constants import DATABASE_URI
 
 
 def create_app_db_engine():
-    return create_engine(DATABASE_URI, echo=True)
+    return create_engine(DATABASE_URI)

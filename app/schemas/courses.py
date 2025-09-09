@@ -201,6 +201,10 @@ class CourseCommentRead(CommentBase):
     reply_to: Optional[CommentBase] = None
     mention: Optional[AccountRead] = None
     created_at: datetime
+    likes: int
+    comment_count: int
+    is_rating: bool
+    is_liked: Optional[bool] = False
 
 
 class PaginatedComments(PaginatedSchema):

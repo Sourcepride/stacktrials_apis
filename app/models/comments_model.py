@@ -6,16 +6,16 @@ import uuid
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import UniqueConstraint
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship
 
-from app.models.base import AppBaseModelMixin
+from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
     from .courses_model import Course
     from .user_model import Account
 
 
-class RatingBase(SQLModel):
+class RatingBase(AppSQLModel):
     star: int = Field(le=5, ge=1)
     message: str
 
@@ -50,11 +50,8 @@ class Rating(AppBaseModelMixin, RatingBase, table=True):
         }
 
 
-class CommentBase(SQLModel):
+class CommentBase(AppSQLModel):
     message: str
-    likes: int = Field(default=0)
-    comment_count: int = Field(default=0)
-    is_rating: bool = Field(default=False)
 
 
 class Comment(AppBaseModelMixin, CommentBase, table=True):
@@ -70,6 +67,9 @@ class Comment(AppBaseModelMixin, CommentBase, table=True):
     mention_id: Optional[uuid.UUID] = Field(
         foreign_key="account.id", default=None, index=True, ondelete="CASCADE"
     )
+    likes: int = Field(default=0)
+    comment_count: int = Field(default=0)
+    is_rating: bool = Field(default=False)
 
     account: "Account" = Relationship(
         back_populates="comments",
@@ -95,3 +95,26 @@ class Comment(AppBaseModelMixin, CommentBase, table=True):
             "single_parent": True,
         },
     )
+
+    comment_likes: list["CommentLike"] = Relationship(
+        back_populates="comment",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+
+class CommentLike(AppBaseModelMixin, table=True):
+
+    __table_args__ = (
+        UniqueConstraint("account_id", "comment_id", name="uix_account_comment"),
+    )
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+    account_id: uuid.UUID = Field(
+        foreign_key="account.id", index=True, ondelete="CASCADE"
+    )
+    comment_id: uuid.UUID = Field(
+        foreign_key="comment.id", index=True, ondelete="CASCADE"
+    )
+
+    account: "Account" = Relationship(back_populates="comment_likes")
+    comment: "Comment" = Relationship(back_populates="comment_likes")
