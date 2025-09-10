@@ -554,48 +554,17 @@ class CourseService:
         course = session.get(Course, data.course_id)
 
         # TODO: before enrollment check for criteria like pay for paid courses
+        # -
 
         if not course:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
             )
 
-        try:
-
-            cleaned_data = data.model_dump(exclude_unset=True)
-            enrollment = CourseEnrollment(**cleaned_data)
-            enrollment.account_id = current_user.id
-
-            session.add(enrollment)
-            session.flush()
-
-            progress = CourseProgress(
-                account_id=current_user.id,
-                course_id=course.id,
-                start_time=datetime.now(timezone.utc),
-                status=ModuleProgressStatus.IN_PROGRESS,
-                last_active_date=datetime.now(timezone.utc),
+        if course.enrollment_type == EnrollmentType.OPEN:
+            return await CourseService._create_entollment(
+                course, data, session, current_user
             )
-
-            session.add(progress)
-            session.flush()
-
-            update_stmt = (
-                update(Course)
-                .where(cast(BinaryExpression, Course.id == data.course_id))
-                .values(
-                    enrollment_count=func.coalesce(Course.enrollment_count, 0) + 1,
-                )
-            )
-
-            session.exec(update_stmt)  # type: ignore
-
-            session.commit()
-            session.refresh(enrollment)
-            return enrollment
-        except Exception as e:
-            session.rollback()
-            raise e
 
     @staticmethod
     async def create_course_rating(
@@ -990,3 +959,47 @@ class CourseService:
             slug = orignal_slug + f"-{counter}"
 
         return slug
+
+    @staticmethod
+    async def _create_entollment(
+        course: Course,
+        data: CourseEnrollmentCreate,
+        session: Session,
+        current_user: Account,
+    ):
+        try:
+
+            cleaned_data = data.model_dump(exclude_unset=True)
+            enrollment = CourseEnrollment(**cleaned_data)
+            enrollment.account_id = current_user.id
+
+            session.add(enrollment)
+            session.flush()
+
+            progress = CourseProgress(
+                account_id=current_user.id,
+                course_id=course.id,
+                start_time=datetime.now(timezone.utc),
+                status=ModuleProgressStatus.IN_PROGRESS,
+                last_active_date=datetime.now(timezone.utc),
+            )
+
+            session.add(progress)
+            session.flush()
+
+            update_stmt = (
+                update(Course)
+                .where(cast(BinaryExpression, Course.id == data.course_id))
+                .values(
+                    enrollment_count=func.coalesce(Course.enrollment_count, 0) + 1,
+                )
+            )
+
+            session.exec(update_stmt)  # type: ignore
+
+            session.commit()
+            session.refresh(enrollment)
+            return enrollment
+        except Exception as e:
+            session.rollback()
+            raise e
