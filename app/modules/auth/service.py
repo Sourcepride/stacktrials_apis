@@ -12,6 +12,8 @@ from sqlmodel import Session, select
 
 from app.common.constants import (
     ACCESS_TOKEN_MINUTES,
+    DROPBOX_CLIENT_ID,
+    DROPBOX_CLIENT_SECRET,
     FRONTEND_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
@@ -279,6 +281,44 @@ async def get_google_access_token_from_refresh(
     return {
         "access_token": token_data["access_token"],
         "expires_in": token_data["expires_in"],
+    }
+
+
+async def get_dropbox_access_token_from_refresh(
+    current_user: Account, session: Session
+) -> dict[str, str]:
+    dropbox_provider = session.exec(
+        select(Provider).where(
+            Provider.provider == Providers.DROP_BOX,
+            Provider.account_id == current_user.id,
+        )
+    ).first()
+
+    if not dropbox_provider:
+        raise HTTPException(status_code=404, detail="Dropbox provider does not exist")
+
+    refresh_token = dropbox_provider.refresh_token
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="No refresh token stored")
+
+    token_url = "https://api.dropboxapi.com/oauth2/token"
+    data = {
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+        "client_id": DROPBOX_CLIENT_ID,
+        "client_secret": DROPBOX_CLIENT_SECRET,
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(token_url, data=data)
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=r.json())
+
+    token_data = r.json()
+    return {
+        "access_token": token_data["access_token"],
+        "expires_in": token_data.get("expires_in"),
     }
 
 

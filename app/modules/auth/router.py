@@ -11,10 +11,17 @@ from app.common.constants import (
 from app.common.utils import encode_state
 from app.core.dependencies import CurrentActiveUser, SessionDep, get_current_active_user
 from app.core.security import oauth, sign_state
-from app.schemas.account import AccessToken, GoogleTokenPayload, RefreshToken, Token
+from app.schemas.account import (
+    AccessToken,
+    GoogleTokenPayload,
+    RefreshToken,
+    ShortLived,
+    Token,
+)
 
 from .service import (
     dropbox_callback_handler,
+    get_dropbox_access_token_from_refresh,
     get_google_access_token_from_refresh,
     github_callback_handler,
     google_callback_handler,
@@ -150,9 +157,17 @@ async def auth_google(
     )
 
 
-@router.get("/google/shortlived")
+@router.get("/google/shortlived", response_model=ShortLived)
 async def google_access_token(
     session: SessionDep,
     current_user: CurrentActiveUser,
 ):
     return await get_google_access_token_from_refresh(current_user, session)
+
+
+@router.get("/drobox/shortlived", response_model=ShortLived)
+async def dropbox_access_token(
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    return await get_dropbox_access_token_from_refresh(current_user, session)
