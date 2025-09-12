@@ -209,6 +209,8 @@ class ModuleAttachmentBase(AppSQLModel):
     embed_url: Optional[str] = Field(max_length=500, default=None)
     title: Optional[str] = None
     description: Optional[str] = None
+    document_type: Optional[DocumentPlatform] = Field(default=None)
+    file_type: Optional[str] = Field(max_length=50, default=None)
 
 
 class ModuleAttachment(AppBaseModelMixin, ModuleAttachmentBase, table=True):

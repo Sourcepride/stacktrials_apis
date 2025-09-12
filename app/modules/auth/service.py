@@ -1,22 +1,29 @@
-import base64
-import json
 from typing import Optional
+from urllib.parse import urljoin, urlparse
 
+import httpx
 from fastapi import HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
 from google.oauth2 import id_token
+from requests import request
 from sqlmodel import Session, select
 
 from app.common.constants import (
     ACCESS_TOKEN_MINUTES,
     FRONTEND_URL,
     GOOGLE_CLIENT_ID,
+    GOOGLE_CLIENT_SECRET,
     IS_DEV,
 )
 from app.common.enum import Providers
-from app.common.utils import decode_state, generate_random_username
+from app.common.utils import (
+    decode_state,
+    encode_state,
+    extract_redirect_uri,
+    generate_random_username,
+)
 from app.core.dependencies import SessionDep
 from app.core.security import create_jwt_token, decode_token, oauth, verify_state
 from app.models.provider_model import Provider
@@ -30,13 +37,12 @@ async def google_one_tap(response: Response, id_token: str, session: Session):
     sub = userinfo["sub"]
 
     return authorize_or_register(
-        response,
         session,
         email,
         Providers.GOOGLE,
         sub,
         "openid email profile",
-        {"should_redirect": "true"},
+        {"redirect": "/"},
     )
 
 
@@ -56,19 +62,23 @@ async def google_callback_handler(
 
     email = userinfo["email"]
     sub = userinfo["sub"]
+    access_token = token.get("access_token")
+    refresh_token = token.get("refresh_token")
+    scopes = token.get("scopes")
 
     state_data = {}
     if state:
         state_data = decode_state(state)
 
     return authorize_or_register(
-        response,
         session,
         email,
         Providers.GOOGLE,
         sub,
-        "openid email profile",
+        scopes,
         state_data,
+        access_token,
+        refresh_token,
     )
 
 
@@ -101,7 +111,6 @@ async def github_callback_handler(
         state_data = decode_state(state)
 
     return authorize_or_register(
-        response,
         session,
         email,
         Providers.GITHUB,
@@ -113,7 +122,7 @@ async def github_callback_handler(
 
 async def dropbox_callback_handler(request: Request, session: Session):
 
-    account = get_account_from_state(request, session)
+    [account, payload] = get_account_from_state(request, session)
 
     assert oauth.dropbox is not None
     token = await oauth.dropbox.authorize_access_token(request)
@@ -134,14 +143,18 @@ async def dropbox_callback_handler(request: Request, session: Session):
     provider_obj = Provider(
         provider=Providers.DROP_BOX,
         provider_id=provider_id,
-        scopes=scopes,
         account_id=account.id,
-        access_token=access_token,
-        refresh_token=refresh_token,
     )
+
+    set_provider_tokens(provider_obj, access_token, refresh_token, scopes, provider_id)
 
     session.add(provider_obj)
     session.commit()
+
+    if payload.get("redirect"):
+        return RedirectResponse(
+            extract_redirect_uri(payload.get("redirect"), FRONTEND_URL)
+        )
 
     return {"ok": True}
 
@@ -184,17 +197,103 @@ async def refresh_token(
     return AccessToken(access_token=access_token)
 
 
+async def google_incremental_auth(
+    request: Request,
+    required_scopes: str,
+    session: Session,
+    current_user: Account,
+    redirect: Optional[str],
+):
+
+    google_provider = session.exec(
+        select(Provider).where(
+            Provider.provider == Providers.GOOGLE,
+            Provider.account_id == current_user.id,
+        )
+    ).first()
+
+    user_scopes = set((google_provider.scopes or "").split()) if google_provider else {}
+    needed_scopes = set(required_scopes.split())
+
+    if needed_scopes.issubset(user_scopes):
+        # Already has scopes, just return token
+        token_data = await get_google_access_token_from_refresh(current_user, session)
+        if redirect:
+            return RedirectResponse(extract_redirect_uri(redirect, FRONTEND_URL))
+        return JSONResponse(
+            {
+                "access_token": token_data["access_token"],
+                "expires_in": token_data["expires_in"],
+            }
+        )
+
+    encoded_state = encode_state({"redirect": redirect or ""})
+
+    # Missing scopes → redirect to Google OAuth (incremental consent)
+    scope_str = "".join(needed_scopes)
+    auth_url = (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={GOOGLE_CLIENT_ID}"
+        f"&redirect_uri={request.url_for("google_callback")}"
+        f"&response_type=code"
+        f"&state={encoded_state}"
+        f"&scope={scope_str}"
+        f"&access_type=offline"
+        f"&include_granted_scopes=true"
+    )
+    return RedirectResponse(auth_url)
+
+
+async def get_google_access_token_from_refresh(
+    current_user: Account, session: Session
+) -> dict[str, str]:
+    google_provider = session.exec(
+        select(Provider).where(
+            Provider.provider == Providers.GOOGLE,
+            Provider.account_id == current_user.id,
+        )
+    ).first()
+
+    if not google_provider:
+        raise HTTPException(status_code=404, detail="Provider does not exist")
+
+    refresh_token = google_provider.refresh_token
+    if not refresh_token:
+        raise HTTPException(status_code=400, detail="No refresh token stored")
+
+    token_url = "https://oauth2.googleapis.com/token"
+    data = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post(token_url, data=data)
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=r.json())
+
+    token_data = r.json()
+    return {
+        "access_token": token_data["access_token"],
+        "expires_in": token_data["expires_in"],
+    }
+
+
 # -------- HELPER FUNCTIONS ---------
 
 
 def authorize_or_register(
-    response: Response,
     session: Session,
     email: str,
     provider: Providers,
     provider_id: str,
     scopes: Optional[str] = None,
     state: dict = {},
+    access_token: Optional[str] = None,
+    refresh_token: Optional[str] = None,
 ):
     # Upsert user
     statement = select(Provider).where(
@@ -204,6 +303,9 @@ def authorize_or_register(
 
     if existing:
         user = existing.account
+        set_provider_tokens(existing, access_token, refresh_token, scopes, provider_id)
+        session.add(existing)
+        session.commit()
     else:
         user = create_account(session, email, provider.value, provider_id, scopes)
     access, refresh = (
@@ -211,11 +313,15 @@ def authorize_or_register(
         create_jwt_token(str(user.id), email, "refresh"),
     )
 
-    if state.get("should_redirect") == "true":
+    if state.get("redirect"):
         secure = not IS_DEV
         samesite = "lax"
         cookie_domain = "localhost" if IS_DEV else None
-        redirect_response = RedirectResponse(url=FRONTEND_URL, status_code=302)
+
+        redirect_response = RedirectResponse(
+            url=extract_redirect_uri(state.get("redirect", ""), FRONTEND_URL),
+            status_code=302,
+        )
 
         redirect_response.set_cookie(
             key="access_token",
@@ -253,6 +359,8 @@ def create_account(
     provider: str,
     provider_id: str,
     scopes: Optional[str] = None,
+    access_token=None,
+    refresh_token=None,
 ) -> Account:
 
     account = session.exec(select(Account).where(Account.email == email)).first()
@@ -266,9 +374,9 @@ def create_account(
         )
         session.add(account)
 
-    provider_obj = Provider(
-        provider=provider, provider_id=provider_id, scopes=scopes, account=account
-    )  # type:  ignore
+    provider_obj = Provider(provider=provider, account=account)  # type:  ignore
+
+    set_provider_tokens(provider_obj, access_token, refresh_token, scopes, provider_id)
 
     session.add(provider_obj)
     session.commit()
@@ -314,4 +422,22 @@ def get_account_from_state(request: Request, session: Session):
     if not account:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
-    return account
+    return [account, payload]
+
+
+def set_provider_tokens(
+    provider: Provider,
+    access_token: str | None,
+    refresh_token: str | None,
+    scopes: str | None,
+    provider_id: str,
+):
+    if refresh_token:  # only overwrite if new refresh_token is issued
+        provider.refresh_token = refresh_token
+    if access_token:
+        provider.access_token = access_token
+    if scopes:
+        provider.scopes = " ".join(
+            set((provider.scopes or "").split()) | set(scopes.split())
+        )  # merge scopes
+    provider.provider_id = provider_id

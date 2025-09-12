@@ -19,6 +19,10 @@ class AccessToken(BaseModel):
     access_token: str
 
 
+class ShortLived(AccessToken):
+    expires_in: int
+
+
 class Token(AccessToken):
     refresh_token: str
     token_type: str

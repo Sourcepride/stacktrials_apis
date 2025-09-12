@@ -1,8 +1,9 @@
+import re
 import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, validator
 
 from app.common.enum import ModuleType, ProgressionType
 from app.models.comments_model import CommentBase, RatingBase

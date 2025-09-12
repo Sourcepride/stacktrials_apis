@@ -37,3 +37,9 @@ DROPBOX_REDIRECT_URI = os.getenv("DROPBOX_REDIRECT_URI")
 PER_PAGE = 20
 IS_DEV = bool(os.getenv("DEV", "").lower() == "true")
 FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+
+
+# Configuration
+UPLOAD_DIR = "uploads"
+MAX_FILE_SIZE = 5 * 1024 * 1024  # 5MB
+ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
