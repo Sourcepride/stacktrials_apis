@@ -160,3 +160,7 @@ def extract_redirect_uri(redirect: str, base_url: str):
         return redirect + f"#{url.fragment}"
 
     return redirect
+
+
+def accepted_mime():
+    pass

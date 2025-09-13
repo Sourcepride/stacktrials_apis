@@ -5,5 +5,12 @@
     "comments": false,
     "strings": false
   },
-  "editor.suggest.showModules": true
+  "editor.suggest.showModules": true,
+  "cSpell.words": ["stacktrails"],
+  "files.watcherExclude": {
+    "**/venv/*/**": true,
+
+  
+}
+
 }

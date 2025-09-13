@@ -1,9 +1,10 @@
 import re
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, HttpUrl, field_validator
 
 from app.common.enum import DocumentPlatform, MediaType, Providers
+from app.models.provider_model import ProviderBase
 
 
 class DocumentValidationResponse(BaseModel):
@@ -56,3 +57,28 @@ class DocumentItem(BaseModel):
         ):
             raise ValueError("URL must be from an allowed provider")
         return v
+
+
+class EXTFile(BaseModel):
+    id: str
+    name: str
+    mime_type: Optional[str]
+    provider: DocumentPlatform
+    link: str
+
+
+class RetrivedFiles(BaseModel):
+    items: list[EXTFile]
+
+
+class ProvidersResp(BaseModel):
+    items: list[ProviderBase]
+
+
+class StorageItem(BaseModel):
+    id: str
+    name: str
+    type: Literal["file", "folder"]
+    mime_type: Optional[str] = None  # Drive uses mimeType; Dropbox not always available
+    path: Optional[str] = None  # Dropbox path_display; None for Drive
+    url: Optional[str] = None  # Public URL (Drive webViewLink or Dropbox shared link)
