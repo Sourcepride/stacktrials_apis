@@ -37,6 +37,7 @@ from app.modules.media.service import (
     GoogleDriveStorageService,
     generate_unique_filename,
     list_active_providers,
+    list_active_storage_providers,
     list_dropbox_files,
     list_google_files,
     validate_image,
@@ -55,10 +56,14 @@ media_routes = APIRouter()
 async def get_storage_service(
     provider: DocumentPlatform, session: SessionDep, current_user: CurrentActiveUser
 ) -> GoogleDriveStorageService | DropBoxStorageService:
-    access_token = await get_google_access_token_from_refresh(current_user, session)
+
     if provider == DocumentPlatform.GOOGLE_DRIVE:
+        access_token = await get_google_access_token_from_refresh(current_user, session)
         return GoogleDriveStorageService(access_token["access_token"])
     elif provider == DocumentPlatform.DROPBOX:
+        access_token = await get_dropbox_access_token_from_refresh(
+            current_user, session
+        )
         return DropBoxStorageService(access_token["access_token"])
     else:
         raise HTTPException(status_code=400, detail="Unsupported provider")
@@ -319,6 +324,14 @@ async def dropbox_files_endpoint(
     mimes = DROPBOX_EXT_GROUPS[type_]
     access_token = await get_dropbox_access_token_from_refresh(current_user, session)
     return await list_dropbox_files(access_token["access_token"], mimes)
+
+
+@media_routes.get("/list-active-storage-providers", response_model=ProvidersResp)
+async def active_storage_providers(
+    current_user: CurrentActiveUser,
+    session: SessionDep,
+):
+    return await list_active_storage_providers(session, current_user)
 
 
 @media_routes.get("/list-active-providers", response_model=ProvidersResp)

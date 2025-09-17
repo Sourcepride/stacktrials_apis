@@ -260,10 +260,22 @@ async def list_dropbox_files(access_token: str, extensions: list[str]) -> list[d
     return results
 
 
+async def list_active_storage_providers(
+    session: Session, current_user: CurrentActiveUser
+):
+    providers = session.exec(
+        select(Provider).where(
+            col(Provider.refresh_token_encrypted).is_not(None),
+            Provider.account_id == current_user.id,
+        )
+    ).all()
+
+    return {"items": providers}
+
+
 async def list_active_providers(session: Session, current_user: CurrentActiveUser):
     providers = session.exec(
         select(Provider).where(
-            col(Provider.refresh_token).is_not(None),
             Provider.account_id == current_user.id,
         )
     ).all()
@@ -329,11 +341,19 @@ class GoogleDriveStorageService(StorageService):
         async with httpx.AsyncClient() as client:
             res = await client.get(
                 self.api_url,
-                params={"q": query, "fields": "files(id,name,mimeType,webViewLink)"},
+                params={
+                    "q": query,
+                    "fields": "files(id,name,mimeType,webViewLink)",
+                    "includeItemsFromAllDrives": "true",
+                    "supportsAllDrives": "true",
+                    "corpora": "allDrives",
+                },
                 headers={"Authorization": f"Bearer {self.access_token}"},
             )
+            # print("**|||||||||||||||||||*******", res.text)
             res.raise_for_status()
-            return self.normalize_response(res.json())
+
+        return self.normalize_response(res.json())
 
     async def get_folder_id_by_name(self, folder_name: str):
         """Resolve folder name to its ID."""

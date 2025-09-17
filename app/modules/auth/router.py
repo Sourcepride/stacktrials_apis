@@ -3,13 +3,15 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, Body, Form, Query, Request, Response
 
-from app.common.constants import (
-    DROPBOX_REDIRECT_URI,
-    GITHUB_REDIRECT_URI,
-    GOOGLE_CLIENT_ID,
-)
+from app.common.constants import DROPBOX_REDIRECT_URI, GITHUB_REDIRECT_URI
 from app.common.utils import encode_state
-from app.core.dependencies import CurrentActiveUser, SessionDep, get_current_active_user
+from app.core.dependencies import (
+    CurrentActiveUser,
+    CurrentActiveUserSilent,
+    RedisDep,
+    SessionDep,
+    get_current_active_user,
+)
 from app.core.security import oauth, sign_state
 from app.schemas.account import (
     AccessToken,
@@ -28,9 +30,17 @@ from .service import (
     google_incremental_auth,
     google_one_tap,
     refresh_token,
+    replace_provider,
 )
 
 router = APIRouter()
+
+
+@router.post("/replace-provider")
+async def replace_provider_call(
+    temp_id: str, session: SessionDep, current_user: CurrentActiveUser, redis: RedisDep
+):
+    return await replace_provider(temp_id, session, redis, current_user)
 
 
 @router.get("/google/login")
@@ -53,10 +63,11 @@ async def google_login(request: Request, redirect: Annotated[Optional[str], Quer
 async def google_callback(
     request: Request,
     session: SessionDep,
-    response: Response,
+    user: CurrentActiveUserSilent,
+    redis: RedisDep,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return await google_callback_handler(request, response, session, state)
+    return await google_callback_handler(request, session, state, user, redis)
 
 
 @router.post("/google-one-tap", response_model=Token)
@@ -87,11 +98,12 @@ async def github_login(request: Request, redirect: Annotated[Optional[bool], Que
 @router.get("/github/callback", response_model=Token)
 async def github_callback(
     request: Request,
-    response: Response,
     session: SessionDep,
+    user: CurrentActiveUserSilent,
+    redis: RedisDep,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return await github_callback_handler(request, response, session, state)
+    return github_callback_handler(request, session, state, user, redis)
 
 
 @router.get("/providers/dropbox/login", description="add dropbox storage")
@@ -110,12 +122,18 @@ async def login_dropbox(
         state_payload["redirect"] = redirect
     state = sign_state(state_payload, expires_seconds=300)
     assert oauth.dropbox is not None
-    return await oauth.dropbox.authorize_redirect(request, redirect_uri, state=state)
+    return await oauth.dropbox.authorize_redirect(
+        request,
+        redirect_uri,
+        state=state,
+        token_access_type="offline",  # ✅ ask for refresh token
+        force_reapprove="true",  # ✅ force re-consent every time
+    )
 
 
 @router.get("/dropbox/callback")
-async def dropbox_callback(request: Request, session: SessionDep):
-    return dropbox_callback_handler(request, session)
+async def dropbox_callback(request: Request, session: SessionDep, redis: RedisDep):
+    return await dropbox_callback_handler(request, session, redis)
 
 
 @router.post("/refresh", response_model=AccessToken)
@@ -152,8 +170,31 @@ async def auth_google(
     required_scopes: space-separated scopes e.g.
       'openid email profile https://www.googleapis.com/auth/drive.file'
     """
+
     return await google_incremental_auth(
         request, required_scopes, session, current_user, redirect
+    )
+
+
+@router.get(
+    "/github/connect", description="connect github account to existing accouunt"
+)
+async def github_connect(
+    request: Request,
+    current_user: CurrentActiveUser,
+    redirect: Annotated[Optional[bool], Query()],
+):
+    state_data = {}
+    if redirect:
+        state_data["redirect"] = redirect
+
+    redirect_uri = GITHUB_REDIRECT_URI or request.url_for("github_callback")
+    state_data["user_id"] = str(current_user.id)
+
+    assert oauth.github is not None
+    encoded_state = encode_state(state_data)
+    return await oauth.github.authorize_redirect(
+        request, redirect_uri, state=encoded_state
     )
 
 

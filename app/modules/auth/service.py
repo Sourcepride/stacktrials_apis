@@ -1,5 +1,8 @@
+import json
+import secrets
+import uuid
 from typing import Optional
-from urllib.parse import urljoin, urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
 from fastapi import HTTPException, Request, Response
@@ -7,6 +10,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
 from google.oauth2 import id_token
+from redis.asyncio import Redis
 from requests import request
 from sqlmodel import Session, select
 
@@ -17,9 +21,11 @@ from app.common.constants import (
     FRONTEND_URL,
     GOOGLE_CLIENT_ID,
     GOOGLE_CLIENT_SECRET,
+    GOOGLE_REDIRECT_URI,
     IS_DEV,
 )
 from app.common.enum import Providers
+from app.common.mixins import MessagePatterns
 from app.common.utils import (
     decode_state,
     encode_state,
@@ -49,8 +55,22 @@ async def google_one_tap(response: Response, id_token: str, session: Session):
 
 
 async def google_callback_handler(
-    request: Request, response: Response, session: Session, state: str | None
+    request: Request,
+    session: Session,
+    state: str | None,
+    current_user: Optional[Account],
+    redis: Redis,
 ):
+
+    state_data = {}
+    if state:
+        state_data = decode_state(state)
+
+    if state_data.get("flow_type") == "connect":
+        return await manual_oauth_callback(
+            request, current_user, session, state_data, redis
+        )
+
     assert oauth.google is not None
     token = await oauth.google.authorize_access_token(request)
     userinfo = token.get("userinfo")
@@ -68,10 +88,6 @@ async def google_callback_handler(
     refresh_token = token.get("refresh_token")
     scopes = token.get("scopes")
 
-    state_data = {}
-    if state:
-        state_data = decode_state(state)
-
     return authorize_or_register(
         session,
         email,
@@ -85,8 +101,13 @@ async def google_callback_handler(
 
 
 async def github_callback_handler(
-    request: Request, response: Response, session: Session, state: str | None
+    request: Request,
+    session: Session,
+    state: str | None,
+    current_user: Optional[Account],
+    redis: Redis,
 ):
+
     assert oauth.github is not None
     token = await oauth.github.authorize_access_token(request)
 
@@ -95,6 +116,16 @@ async def github_callback_handler(
 
     provider_id = str(profile["id"])
     email = profile.get("email")
+
+    state_data = {}
+    if state:
+        state_data = decode_state(state)
+
+    if state_data.get("flow_type") == "connect":
+        scopes = " ".join(token.get("scope", "read:user,user:email").split(","))
+        return await add_github_account(
+            current_user, session, state_data, redis, scopes, provider_id
+        )
 
     # If email not available, fetch from /user/emails
     if not email:
@@ -108,10 +139,6 @@ async def github_callback_handler(
             )
             email = primary["email"]
 
-    state_data = {}
-    if state:
-        state_data = decode_state(state)
-
     return authorize_or_register(
         session,
         email,
@@ -122,7 +149,7 @@ async def github_callback_handler(
     )
 
 
-async def dropbox_callback_handler(request: Request, session: Session):
+async def dropbox_callback_handler(request: Request, session: Session, redis: Redis):
 
     [account, payload] = get_account_from_state(request, session)
 
@@ -142,20 +169,47 @@ async def dropbox_callback_handler(request: Request, session: Session):
     user_info = resp.json()
     provider_id = user_info["account_id"]
 
-    provider_obj = Provider(
-        provider=Providers.DROP_BOX,
-        provider_id=provider_id,
-        account_id=account.id,
-    )
+    # TODO:  check if provider already exists show message to attach new provider
+    provider = session.exec(
+        select(Provider).where(
+            Provider.account_id == account.id, Provider.provider == Providers.DROP_BOX
+        )
+    ).first()
 
-    set_provider_tokens(provider_obj, access_token, refresh_token, scopes, provider_id)
+    if provider and provider.provider_id != provider_id:
+        redirect = (
+            extract_redirect_uri(payload["redirect"], FRONTEND_URL)
+            if payload.get("redirect")
+            else "/"
+        )
+        temp_id = await store_provider_temp(
+            Providers.DROP_BOX,
+            provider_id,
+            redis,
+            access_token,
+            refresh_token,
+            scopes,
+            str(account.id),
+        )
 
-    session.add(provider_obj)
+        return RedirectResponse(
+            create_confirm_url(redirect, Providers.DROP_BOX, temp_id), status_code=303
+        )
+    elif not provider:
+        provider = Provider(
+            provider=Providers.DROP_BOX,
+            provider_id=provider_id,
+            account_id=account.id,
+        )
+
+    set_provider_tokens(provider, access_token, refresh_token, scopes, provider_id)
+
+    session.add(provider)
     session.commit()
 
     if payload.get("redirect"):
         return RedirectResponse(
-            extract_redirect_uri(payload.get("redirect"), FRONTEND_URL)
+            extract_redirect_uri(payload.get("redirect"), FRONTEND_URL), status_code=303
         )
 
     return {"ok": True}
@@ -221,7 +275,9 @@ async def google_incremental_auth(
         # Already has scopes, just return token
         token_data = await get_google_access_token_from_refresh(current_user, session)
         if redirect:
-            return RedirectResponse(extract_redirect_uri(redirect, FRONTEND_URL))
+            return RedirectResponse(
+                extract_redirect_uri(redirect, FRONTEND_URL), status_code=303
+            )
         return JSONResponse(
             {
                 "access_token": token_data["access_token"],
@@ -229,10 +285,22 @@ async def google_incremental_auth(
             }
         )
 
-    encoded_state = encode_state({"redirect": redirect or ""})
+    csrf_token = secrets.token_hex(32)
+
+    encoded_state = encode_state(
+        {
+            "csrf": csrf_token,
+            "user_id": str(current_user.id),
+            "redirect": redirect or "",
+            "flow_type": "connect",
+            "required_scopes": required_scopes,
+        }
+    )
+
+    request.session["oauth_csrf"] = csrf_token
 
     # Missing scopes → redirect to Google OAuth (incremental consent)
-    scope_str = "".join(needed_scopes)
+    scope_str = " ".join(needed_scopes)
     auth_url = (
         "https://accounts.google.com/o/oauth2/v2/auth"
         f"?client_id={GOOGLE_CLIENT_ID}"
@@ -241,6 +309,7 @@ async def google_incremental_auth(
         f"&state={encoded_state}"
         f"&scope={scope_str}"
         f"&access_type=offline"
+        f"&prompt=consent"
         f"&include_granted_scopes=true"
     )
     return RedirectResponse(auth_url)
@@ -278,6 +347,7 @@ async def get_google_access_token_from_refresh(
         raise HTTPException(status_code=400, detail=r.json())
 
     token_data = r.json()
+
     return {
         "access_token": token_data["access_token"],
         "expires_in": token_data["expires_in"],
@@ -322,6 +392,48 @@ async def get_dropbox_access_token_from_refresh(
     }
 
 
+async def replace_provider(
+    temp_id: str, session: Session, redis: Redis, current_user: Account
+):
+    new_data = await retrieve_stored_provider(temp_id, redis)
+
+    if new_data["user_id"] != str(current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # Delete existing provider record
+    existing_provider = session.exec(
+        select(Provider).where(
+            Provider.account_id == current_user.id,
+            Provider.provider == new_data["provider"],
+        )
+    ).first()
+    if existing_provider:
+        session.delete(existing_provider)
+        session.commit()
+
+    # Save new provider record
+    new_provider = Provider(
+        provider=new_data["provider"],
+        provider_id=new_data["provider_id"],
+        account_id=current_user.id,
+    )
+
+    set_provider_tokens(
+        new_provider,
+        new_data.get("access_token"),
+        new_data.get("refresh_token"),
+        new_data["scopes"],
+        new_data["provider_id"],
+    )
+    session.add(new_provider)
+    session.commit()
+
+    # Cleanup
+    await redis.delete(f"temp:provider:{temp_id}")
+
+    return {"ok": True}
+
+
 # -------- HELPER FUNCTIONS ---------
 
 
@@ -345,9 +457,15 @@ def authorize_or_register(
         user = existing.account
         set_provider_tokens(existing, access_token, refresh_token, scopes, provider_id)
         session.add(existing)
-        session.commit()
     else:
-        user = create_account(session, email, provider.value, provider_id, scopes)
+        user = create_account(session, email)
+        if not user:
+            return RedirectResponse(
+                FRONTEND_URL + f"?message={MessagePatterns.MESSAGE_ACCOUNT_EXISTS}",
+                status_code=303,
+            )
+
+    session.commit()
     access, refresh = (
         create_jwt_token(str(user.id), email),
         create_jwt_token(str(user.id), email, "refresh"),
@@ -396,12 +514,7 @@ def authorize_or_register(
 def create_account(
     session: Session,
     email: str,
-    provider: str,
-    provider_id: str,
-    scopes: Optional[str] = None,
-    access_token=None,
-    refresh_token=None,
-) -> Account:
+) -> Optional[Account]:
 
     account = session.exec(select(Account).where(Account.email == email)).first()
 
@@ -413,16 +526,153 @@ def create_account(
             profile=profile,
         )
         session.add(account)
+        return account
 
-    provider_obj = Provider(provider=provider, account=account)  # type:  ignore
 
-    set_provider_tokens(provider_obj, access_token, refresh_token, scopes, provider_id)
+async def manual_oauth_callback(
+    request: Request,
+    current_user: Optional[Account],
+    session: Session,
+    state_data: dict[str, str],
+    redis: Redis,
+):
+    code = request.query_params.get("code")
+    if not code or not state_data:
+        raise HTTPException(400, "Missing code or state")
 
-    session.add(provider_obj)
+    csrf_token = state_data.get("csrf")
+    saved_token = request.session.pop("oauth_csrf", None)
+
+    if not saved_token or csrf_token != saved_token:
+        raise HTTPException(400, "Invalid CSRF state")
+
+    if not current_user:
+        raise HTTPException(400, "User account required")
+
+    if state_data.get("user_id") != str(current_user.id):
+        raise HTTPException(403, "User mismatch")
+
+    # Exchange authorization code for tokens
+    async with httpx.AsyncClient() as client:
+        token_res = await client.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": code,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "redirect_uri": GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        token_res.raise_for_status()
+        tokens = token_res.json()
+
+    userinfo = tokens.get("userinfo")
+    if not userinfo:
+        # Fallback: some providers place claims in id_token
+        id_token = tokens.get("id_token")
+        if not id_token:
+            raise HTTPException(status_code=400, detail="No user info from Google")
+        userinfo = verify_google_auth_token(id_token)
+
+    provider = session.exec(
+        select(Provider).where(
+            Provider.provider == Providers.GOOGLE,
+            Provider.account_id == current_user.id,
+        )
+    ).first()
+
+    redirect = (
+        extract_redirect_uri(state_data["redirect"], FRONTEND_URL)
+        if state_data.get("redirect")
+        else "/"
+    )
+    if provider and provider.provider_id != userinfo["sub"]:
+        # replace
+        temp_id = await store_provider_temp(
+            Providers.GOOGLE,
+            userinfo["sub"],
+            redis,
+            tokens["access_token"],
+            tokens.get("refresh_token"),
+            tokens.get("scope"),
+            str(current_user.id),
+        )
+
+        return RedirectResponse(
+            create_confirm_url(redirect, Providers.GOOGLE, temp_id), status_code=303
+        )
+    elif not provider:
+        provider = Provider(
+            provider=Providers.GOOGLE, account=current_user
+        )  # type:  ignore
+
+    set_provider_tokens(
+        provider,
+        tokens.get("access_token"),
+        tokens.get("refresh_token"),
+        tokens.get("scopes") or state_data.get("required_scopes"),
+        userinfo["sub"],
+    )
+
+    session.add(provider)
     session.commit()
 
-    session.refresh(account)
-    return account
+    return RedirectResponse(redirect, status_code=303)
+
+
+async def add_github_account(
+    current_user: Optional[Account],
+    session: Session,
+    state_data: dict[str, str],
+    redis: Redis,
+    scopes: str,
+    provider_id: str,
+):
+    if not current_user:
+        raise HTTPException(400, "User account required")
+
+    if state_data.get("user_id") != str(current_user.id):
+        raise HTTPException(403, "User mismatch")
+
+    provider = session.exec(
+        select(Provider).where(
+            Provider.provider == Providers.GITHUB,
+            Provider.account_id == current_user.id,
+        )
+    ).first()
+
+    redirect = (
+        extract_redirect_uri(state_data["redirect"], FRONTEND_URL)
+        if state_data.get("redirect")
+        else "/"
+    )
+    if provider and provider.provider_id != provider_id:
+        # replace
+        temp_id = await store_provider_temp(
+            Providers.GITHUB,
+            provider_id,
+            redis,
+            None,
+            None,
+            scopes,
+            str(current_user.id),
+        )
+
+        return RedirectResponse(
+            create_confirm_url(redirect, Providers.GOOGLE, temp_id), status_code=303
+        )
+    elif not provider:
+        provider = Provider(
+            provider=Providers.GITHUB, account=current_user
+        )  # type:  ignore
+
+    set_provider_tokens(provider, None, None, scopes, provider_id)
+    session.add(provider)
+    session.commit()
+
+    return RedirectResponse(redirect, status_code=303)
 
 
 def verify_google_auth_token(id_token_str: str) -> dict:
@@ -481,3 +731,52 @@ def set_provider_tokens(
             set((provider.scopes or "").split()) | set(scopes.split())
         )  # merge scopes
     provider.provider_id = provider_id
+
+
+async def store_provider_temp(
+    provider: Providers,
+    provider_id: str,
+    redis: Redis,
+    access_token: Optional[str],
+    refresh_token: Optional[str],
+    scopes: str,
+    user_id: str,
+):
+    temp_id = str(uuid.uuid4())
+    await redis.setex(
+        f"temp:provider:{temp_id}",
+        300,  # expires in 5 mins
+        json.dumps(
+            {
+                "provider": provider,
+                "provider_id": provider_id,
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "scopes": scopes,
+                "user_id": user_id,
+            }
+        ),
+    )
+
+    return temp_id
+
+
+async def retrieve_stored_provider(cache_key: str, redis: Redis):
+    data = await redis.get(f"temp:provider:{cache_key}")
+    if not data:
+        raise HTTPException(status_code=400, detail="Replacement request expired")
+
+    return json.loads(data)
+
+
+def create_confirm_url(redirectUrl: str, provider: Providers, temp_id: str):
+    parsed = urlparse(redirectUrl)
+
+    query = parse_qs(parsed.query)
+    # merge with new params
+    query["replace_provider"] = [provider.value]
+    query["temp_id"] = [temp_id]
+
+    new_query = urlencode(query, doseq=True)
+    new_url = urlunparse(parsed._replace(query=new_query))
+    return new_url

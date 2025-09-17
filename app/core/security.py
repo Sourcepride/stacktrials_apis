@@ -49,7 +49,7 @@ oauth.register(
     access_token_url="https://api.dropboxapi.com/oauth2/token",
     api_base_url="https://api.dropboxapi.com/2/",
     client_kwargs={
-        "scope": "files.metadata.read files.content.write account_info.read"
+        "scope": "files.metadata.read files.content.write account_info.read files.metadata.write files.content.read sharing.write sharing.read"
     },
 )
 

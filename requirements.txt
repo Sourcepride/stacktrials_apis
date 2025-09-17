@@ -50,4 +50,5 @@ google-api-python-client==2.179.0
 Authlib==1.6.1
 PyJWT==2.10.1
 itsdangerous==2.2.0
-pillow
+pillow==11.3.0
+redis

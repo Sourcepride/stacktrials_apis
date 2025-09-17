@@ -1,15 +1,15 @@
 # Shared dependencies for routes
 
 
-from typing import Annotated, Optional
+from typing import Annotated, AsyncGenerator, Optional
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import Engine
+from redis.asyncio import Redis
 from sqlmodel import Session
 
 from ..models.user_model import Account
-from .database import create_app_db_engine
+from .database import create_app_db_engine, redis_client
 from .security import decode_token
 
 engine = create_app_db_engine()
@@ -21,7 +21,16 @@ def get_session():
         yield session
 
 
+async def get_redis() -> AsyncGenerator:
+    try:
+        yield redis_client
+    finally:
+        # you usually don’t close it per request
+        pass
+
+
 SessionDep = Annotated[Session, Depends(get_session)]
+RedisDep = Annotated[Redis, Depends(get_redis)]
 
 
 def get_token_from_request(

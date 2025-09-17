@@ -42,7 +42,7 @@ async def index():
 
 
 version_1 = "/api/v1"
-app.include_router(media.router.media_routes)
+app.include_router(media.router.media_routes, prefix=f"{version_1}", tags=["media"])
 app.include_router(auth.router.router, prefix=f"{version_1}/auth", tags=["auth"])
 app.include_router(
     account.router.router, prefix=f"{version_1}/account", tags=["account"]
