@@ -44,7 +44,9 @@ async def replace_provider_call(
 
 
 @router.get("/google/login")
-async def google_login(request: Request, redirect: Annotated[Optional[str], Query()]):
+async def google_login(
+    request: Request, redirect: Annotated[Optional[str], Query()] = None
+):
     state_data = {}
     if redirect:
         state_data["redirect"] = redirect

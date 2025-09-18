@@ -14,7 +14,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from app.common.constants import (
     ALLOWED_EXTENSIONS,
@@ -117,7 +117,11 @@ async def proxy_image(
                     }
                 )
 
-            # For direct/preview, proxy the content
+            elif format == "preview":
+                # just bounce user to the provider's preview page
+                return RedirectResponse(url=urls["preview_url"])
+
+            # For direct, proxy the content
             async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
                 response = await client.get(target_url)
 

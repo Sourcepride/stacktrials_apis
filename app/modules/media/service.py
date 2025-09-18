@@ -5,7 +5,7 @@ import uuid
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 from fastapi import HTTPException, UploadFile
@@ -143,15 +143,49 @@ class DocumentUrlConverter:
         return base_urls
 
     @staticmethod
-    def convert_dropbox_urls(url: str, _media_type: MediaType) -> dict[str, str]:
-        """Convert Dropbox URLs for different purposes"""
-        base_urls = {
-            "direct_url": url.replace("?dl=0", "?dl=1"),
-            "preview_url": url.replace("?dl=0", "?dl=0"),
-            "embed_url": url.replace("?dl=0", "?embed=1"),
-        }
+    def convert_dropbox_urls(
+        url: str, _media_type: str | None = None
+    ) -> dict[str, str]:
+        """
+        Convert various Dropbox shared-link formats into:
+        - direct_url   -> dl.dropboxusercontent.com (raw file bytes, good for <img> or proxying)
+        - preview_url  -> www.dropbox.com with dl=0 (Dropbox preview page)
+        - embed_url    -> www.dropbox.com with raw=1 (works for many embed cases / iframes)
+        """
+        p = urlparse(url)
+        scheme = p.scheme or "https"
+        path = p.path
+        qs = parse_qs(p.query, keep_blank_values=True)
 
-        return base_urls
+        # Remove parameters that control presentation; keep other params (e.g., rlkey)
+        remove_keys = {"dl", "raw", "embed"}
+        filtered_qs = {k: v for k, v in qs.items() if k.lower() not in remove_keys}
+
+        def build_url(host: str, query_dict: dict) -> str:
+            query = urlencode(query_dict, doseq=True)
+            return urlunparse((scheme, host, path, p.params, query, p.fragment))
+
+        # direct link should use dl.dropboxusercontent.com and exclude dl/raw/embed params
+        direct_host = "dl.dropboxusercontent.com"
+        direct_url = build_url(direct_host, filtered_qs)
+
+        # preview link: www.dropbox.com with dl=0
+        preview_host = "www.dropbox.com"
+        preview_qs = dict(filtered_qs)  # shallow copy
+        preview_qs["dl"] = ["0"]
+        preview_url = build_url(preview_host, preview_qs)
+
+        # embed link: www.dropbox.com with raw=1
+        embed_qs = dict(filtered_qs)
+        embed_qs["raw"] = ["1"]
+        embed_url = build_url(preview_host, embed_qs)
+
+        return {
+            "original": url,
+            "direct_url": direct_url,
+            "preview_url": preview_url,
+            "embed_url": embed_url,
+        }
 
     @classmethod
     def convert_urls(
