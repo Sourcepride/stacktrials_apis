@@ -1,8 +1,10 @@
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Optional, cast
 
 from fastapi import HTTPException, status
-from sqlmodel import Session, asc, col, desc, select
+from sqlalchemy import BinaryExpression, text
+from sqlmodel import Session, asc, col, desc, func, select, update
 
 from app.common.constants import PER_PAGE
 from app.common.enum import (
@@ -16,7 +18,7 @@ from app.common.enum import (
 )
 from app.common.utils import paginate, slugify
 from app.core.dependencies import CurrentActiveUser
-from app.models.comments_model import Comment, Rating
+from app.models.comments_model import Comment, CommentLike, Rating
 from app.models.courses_model import (
     Course,
     CourseEnrollment,
@@ -33,6 +35,7 @@ from app.models.user_model import Account
 from app.modules import course
 from app.schemas.courses import (
     CourseCommentCreate,
+    CourseCommentRead,
     CourseCommentUpdate,
     CourseCreate,
     CourseEnrollmentCreate,
@@ -58,6 +61,7 @@ class CourseService:
         sort: SortCoursesBy | None,
         level: DifficultyLevel | None,
         session: Session,
+        language: str | None,
         page: int = 1,
         per_page: int = PER_PAGE,
     ):
@@ -71,10 +75,15 @@ class CourseService:
             base_query = base_query.where(col(Course.title).ilike(f"%{title}%"))
 
         if level:
-            base_query = base_query.where(Course.difficulty_level == DifficultyLevel)
+            base_query = base_query.where(Course.difficulty_level == level)
 
-        if sort:
+        if language:
+            base_query = base_query.where(Course.language == language)
+
+        if sort == SortCoursesBy.MOST_ENROLLED:
             base_query.order_by(desc(Course.comment_count))
+        elif sort == SortCoursesBy.TOP_RATED:
+            base_query.order_by(desc(Course.average_rating))
         else:
             base_query.order_by(desc(Course.created_at))
 
@@ -143,9 +152,9 @@ class CourseService:
 
     @staticmethod
     async def update_course(
-        session: Session, id: str, slug: str, data: CourseUpdate, current_user: Account
+        session: Session, slug: str, data: CourseUpdate, current_user: Account
     ):
-        course = CourseService._get_course_or_404(id, slug, session)
+        course = CourseService._get_course_or_404(slug, session)
 
         if course.account_id != current_user.id:
             raise HTTPException(
@@ -167,24 +176,22 @@ class CourseService:
         return course
 
     @staticmethod
-    async def course_detail(session: Session, id: str, slug: str):
-        course = CourseService._get_course_or_404(id, slug, session)
+    async def course_detail(session: Session, slug: str):
+        course = CourseService._get_course_or_404(slug, session)
 
         return course
 
     @staticmethod
-    async def course_content(session: Session, id: str, slug: str):
-        course = CourseService._get_course_or_404(id, slug, session)
+    async def course_content(session: Session, slug: str):
+        course = CourseService._get_course_or_404(slug, session)
         return course
 
     @staticmethod
-    async def course_content_full(
-        session: Session, id: str, slug: str, current_user: Account
-    ):
-        course = CourseService._get_course_or_404(id, slug, session)
+    async def course_content_full(session: Session, slug: str, current_user: Account):
+        course = CourseService._get_course_or_404(slug, session)
         course_enrollment = session.exec(
             select(CourseEnrollment).where(
-                CourseEnrollment.course_id == id,
+                CourseEnrollment.course_id == course.id,
                 CourseEnrollment.account_id == current_user.id,
             )
         ).first()
@@ -236,6 +243,8 @@ class CourseService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
             )
+
+        # TODO:  upate updated_at for course
 
         cleaned_data = data.model_dump(exclude_unset=True)
         section.sqlmodel_update(cleaned_data)
@@ -325,6 +334,8 @@ class CourseService:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
             )
+
+        # TODO:  upate updated_at for course
 
         cleaned_data = data.model_dump(exclude_unset=True)
         module.sqlmodel_update(cleaned_data)
@@ -520,6 +531,20 @@ class CourseService:
         session.commit()
 
     @staticmethod
+    async def get_enrollment(course_id: str, session: Session, curent_user: Account):
+        enrollment = session.exec(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == course_id,
+                CourseEnrollment.account_id == curent_user.id,
+            )
+        ).first()
+
+        if not enrollment:
+            raise HTTPException(404, "not enrolled")
+
+        return enrollment
+
+    @staticmethod
     async def create_enrollment(
         session: Session,
         data: CourseEnrollmentCreate,
@@ -529,30 +554,17 @@ class CourseService:
         course = session.get(Course, data.course_id)
 
         # TODO: before enrollment check for criteria like pay for paid courses
+        # -
 
         if not course:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
             )
 
-        cleaned_data = data.model_dump(exclude_unset=True)
-        enrollment = CourseEnrollment(**cleaned_data)
-        enrollment.account_id = current_user.id
-
-        progress = CourseProgress(
-            account_id=current_user.id,
-            course_id=course.id,
-            start_time=datetime.now(timezone.utc),
-            status=ModuleProgressStatus.IN_PROGRESS,
-            last_active_date=datetime.now(timezone.utc),
-        )
-
-        session.add(enrollment)
-        session.add(progress)
-        session.commit()
-        session.refresh(enrollment)
-
-        return enrollment
+        if course.enrollment_type == EnrollmentType.OPEN:
+            return await CourseService._create_entollment(
+                course, data, session, current_user
+            )
 
     @staticmethod
     async def create_course_rating(
@@ -561,7 +573,6 @@ class CourseService:
         current_user: Account,
     ):
         course = session.get(Course, data.course_id)
-
         if not course:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
@@ -573,35 +584,70 @@ class CourseService:
                 CourseEnrollment.account_id == current_user.id,
             )
         ).first()
-
         if not enrollment:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="You cannot rate a course you have not enrolled for",
             )
 
-        cleaned_data = data.model_dump(exclude_unset=True)
-        rating = Rating(**cleaned_data)
-        rating.account_id = current_user.id
-        # this is to support replies
-        comment = Comment(
-            message=data.message,
-            is_rating=True,
-            course_id=data.course_id,
-            creator_id=current_user.id,
-        )
+        # Check if user already rated this course
+        existing_rating = session.exec(
+            select(Rating).where(
+                Rating.course_id == data.course_id,
+                Rating.account_id == current_user.id,
+            )
+        ).first()
 
-        session.add(comment)
-        session.commit()
-        session.refresh(comment)
+        if existing_rating:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You have already rated this course",
+            )
 
-        rating.comment_id = comment.id
+        try:
 
-        session.add(rating)
-        session.commit()
-        session.refresh(rating)
+            # Create comment first
+            comment = Comment(
+                message=data.message,
+                is_rating=True,
+                course_id=data.course_id,
+                creator_id=current_user.id,
+            )
+            session.add(comment)
+            session.flush()  # Get the comment ID without committing
 
-        return rating
+            # Create rating
+            cleaned_data = data.model_dump(exclude_unset=True)
+            rating = Rating(**cleaned_data)
+            rating.account_id = current_user.id
+            rating.comment_id = comment.id
+            session.add(rating)
+            session.flush()  # Ensure rating is created
+
+            # Atomically update course statistics using SQLModel's update
+            update_stmt = (
+                update(Course)
+                .where(cast(BinaryExpression, Course.id == data.course_id))
+                .values(
+                    total_rating=func.coalesce(Course.total_rating, 0) + 1,
+                    stars=func.coalesce(Course.stars, 0) + data.star,
+                    average_rating=(func.coalesce(Course.stars, 0) + data.star)
+                    / (func.coalesce(Course.total_rating, 0) + 1),
+                )
+            )
+
+            session.exec(update_stmt)  # type: ignore
+            session.commit()
+
+            # Refresh to get updated values
+            session.refresh(rating)
+            session.refresh(course)
+
+            return rating
+
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     async def list_ratings(
@@ -625,59 +671,84 @@ class CourseService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
             )
 
-        if not data.reply_to_id:
-            comment = Comment(**data.model_dump(exclude_unset=True))
-            comment.is_rating = False
-            comment.creator_id = current_user.id
-            session.add(comment)
+        comment_replied = None
+
+        if data.reply_to_id:
+            comment_replied = session.get(Comment, data.reply_to_id)
+
+            if not comment_replied:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND, detail="comment not found"
+                )
+
+        try:
+
+            if not data.reply_to_id:
+                comment = Comment(**data.model_dump(exclude_unset=True))
+                comment.is_rating = False
+                comment.creator_id = current_user.id
+                session.add(comment)
+                session.flush()
+            elif comment_replied:
+
+                """
+                course_id
+                reply_to
+                    -  get the comment
+                        if it a reply_to take the id of that reply_to
+
+                course
+                    - comment A
+                        -  comment B
+                        -  comment C  [mention_id  @comment B ]
+                """
+
+                reply_to_id = (
+                    comment_replied.reply_to_id
+                    if comment_replied.reply_to_id
+                    else comment_replied.id
+                )
+
+                comment = Comment(**data.model_dump(exclude_unset=True))
+                comment.is_rating = (
+                    comment_replied.is_rating
+                )  # replies to ratings are ratings comments
+                comment.mention_id = comment_replied.creator_id
+                comment.creator_id = current_user.id
+                comment.reply_to_id = reply_to_id
+                session.add(comment)
+                session.flush()
+
+                # comment_count increment
+                upgraded_parent = session.get(Comment, reply_to_id)
+                assert upgraded_parent is not None
+
+                update_stmt_parent = (
+                    update(Comment)
+                    .where(cast(BinaryExpression, Comment.id == reply_to_id))
+                    .values(
+                        comment_count=func.coalesce(Comment.comment_count, 0) + 1,
+                    )
+                )
+
+                session.exec(update_stmt_parent)  # type: ignore
+            # increment course comment count
+            # Atomically update course statistics using SQLModel's update
+            update_stmt = (
+                update(Course)
+                .where(cast(BinaryExpression, Course.id == data.course_id))
+                .values(
+                    comment_count=func.coalesce(Course.comment_count, 0) + 1,
+                )
+            )
+
+            session.exec(update_stmt)  # type: ignore
             session.commit()
             session.refresh(comment)
             return comment
-
-        """
-            course_id
-            reply_to
-                -  get the comment 
-                    if it a reply_to take the id of that reply_to
-
-            course
-                - comment A
-                    -  comment B 
-                    -  comment C  [mention_id  @comment B ]  
-        """
-
-        comment_replied = session.get(Comment, data.reply_to_id)
-
-        if not comment_replied:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="comment not found"
-            )
-
-        reply_to_id = (
-            comment_replied.reply_to_id
-            if comment_replied.reply_to_id
-            else comment_replied.id
-        )
-
-        comment = Comment(**data.model_dump(exclude_unset=True))
-        comment.is_rating = (
-            comment_replied.is_rating
-        )  # replies to ratings are ratings comments
-        comment.mention_id = comment_replied.creator_id
-        comment.creator_id = current_user.id
-        comment.reply_to_id = reply_to_id
-
-        # comment_count increment
-        upgraded_parent = session.get(Comment, reply_to_id)
-        assert upgraded_parent is not None
-        upgraded_parent.comment_count += 1
-
-        session.add(comment)
-        session.add(upgraded_parent)
-        session.commit()
-        session.refresh(comment)
-
-        return comment
+        except Exception as e:
+            session.rollback()
+            raise e
 
     @staticmethod
     async def update_comment(
@@ -716,13 +787,126 @@ class CourseService:
 
     @staticmethod
     async def list_comments(
-        course_id: str, session: Session, page: int = 1, per_page: int = PER_PAGE
+        course_id: str,
+        session: Session,
+        page: int = 1,
+        current_user: Optional[Account] = None,
+        per_page: int = PER_PAGE,
     ):
-        query = select(Comment).where(
-            Comment.course_id == course_id, Comment.is_rating == False
+        query = (
+            select(Comment)
+            .where(
+                Comment.course_id == course_id,
+                Comment.is_rating == False,
+                Comment.reply_to == None,
+            )
+            .order_by(desc(Comment.created_at))
         )
 
-        return paginate(session, query, page, per_page)
+        data = paginate(session, query, page, per_page)
+
+        if current_user:
+            likes = session.exec(
+                select(CommentLike, Comment.course_id)
+                .join(CommentLike)
+                .where(
+                    Comment.course_id == course_id,
+                    CommentLike.account_id == current_user.id,
+                )
+            ).all()
+
+            like_map = {}
+            for comment_like, _ in likes:
+                like_map[comment_like.comment_id] = True
+
+            def _fill(x: Comment):
+                comment_read = CourseCommentRead.model_validate(x)
+                return comment_read.model_copy(
+                    update={"is_liked": like_map.get(x.id, False)}
+                )
+
+            data["items"] = list(map(_fill, data["items"]))
+
+        return data
+
+    @staticmethod
+    async def list_replies(
+        comment_id: str,
+        session: Session,
+        page: int = 1,
+        current_user: Optional[Account] = None,
+        per_page: int = PER_PAGE,
+    ):
+        query = (
+            select(Comment)
+            .where(Comment.reply_to_id == comment_id)
+            .order_by(desc(Comment.created_at))
+        )
+
+        data = paginate(session, query, page, per_page)
+
+        if current_user:
+            likes = session.exec(
+                select(CommentLike, Comment)
+                .join(CommentLike)
+                .where(
+                    Comment.reply_to_id == comment_id,
+                    CommentLike.account_id == current_user.id,
+                )
+            ).all()
+
+            like_map = {}
+            for comment_like, _ in likes:
+                like_map[comment_like.comment_id] = True
+
+            def _fill(x: Any):
+                comment_read = CourseCommentRead.model_validate(x)
+                return comment_read.model_copy(
+                    update={"is_liked": like_map.get(x.id, False)}
+                )
+
+            data["items"] = list(map(_fill, data["items"]))
+
+        return data
+
+    @staticmethod
+    async def like_unlike(comment_id: str, session: Session, current_user: Account):
+
+        comment = session.get(Comment, comment_id)
+
+        if not comment:
+            raise HTTPException(404, "comment not found!")
+
+        like = session.exec(
+            select(CommentLike).where(
+                CommentLike.account_id == current_user.id,
+                CommentLike.comment_id == comment_id,
+            )
+        ).first()
+
+        if like:
+            session.delete(like)
+            update_stmt = (
+                update(Comment)
+                .where(cast(BinaryExpression, Comment.id == comment_id))
+                .values(
+                    likes=func.coalesce(Comment.likes, 1) - 1,
+                )
+            )
+            session.exec(update_stmt)  # type:  ignore
+        else:
+            session.add(CommentLike(account_id=current_user.id, comment_id=comment.id))
+            update_stmt = (
+                update(Comment)
+                .where(cast(BinaryExpression, Comment.id == comment_id))
+                .values(
+                    likes=func.coalesce(Comment.likes, 0) + 1,
+                )
+            )
+            session.exec(update_stmt)  # type:  ignore
+        session.commit()
+
+        return
 
     @staticmethod
     async def add_tag_to_course():
@@ -758,10 +942,8 @@ class CourseService:
             )
 
     @staticmethod
-    def _get_course_or_404(course_id: str, slug: str, session: Session):
-        course = session.exec(
-            select(Course).where(Course.id == course_id, Course.slug == slug)
-        ).first()
+    def _get_course_or_404(slug: str, session: Session):
+        course = session.exec(select(Course).where(Course.slug == slug)).first()
         if not course:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "course not found")
         return course
@@ -777,3 +959,47 @@ class CourseService:
             slug = orignal_slug + f"-{counter}"
 
         return slug
+
+    @staticmethod
+    async def _create_entollment(
+        course: Course,
+        data: CourseEnrollmentCreate,
+        session: Session,
+        current_user: Account,
+    ):
+        try:
+
+            cleaned_data = data.model_dump(exclude_unset=True)
+            enrollment = CourseEnrollment(**cleaned_data)
+            enrollment.account_id = current_user.id
+
+            session.add(enrollment)
+            session.flush()
+
+            progress = CourseProgress(
+                account_id=current_user.id,
+                course_id=course.id,
+                start_time=datetime.now(timezone.utc),
+                status=ModuleProgressStatus.IN_PROGRESS,
+                last_active_date=datetime.now(timezone.utc),
+            )
+
+            session.add(progress)
+            session.flush()
+
+            update_stmt = (
+                update(Course)
+                .where(cast(BinaryExpression, Course.id == data.course_id))
+                .values(
+                    enrollment_count=func.coalesce(Course.enrollment_count, 0) + 1,
+                )
+            )
+
+            session.exec(update_stmt)  # type: ignore
+
+            session.commit()
+            session.refresh(enrollment)
+            return enrollment
+        except Exception as e:
+            session.rollback()
+            raise e

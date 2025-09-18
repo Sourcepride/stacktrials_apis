@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import Column, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlmodel import Field, Relationship, SQLModel
+from sqlmodel import Field, Relationship
 
 from app.common.enum import (
     ChatType,
@@ -13,14 +13,14 @@ from app.common.enum import (
     MemberStatus,
     MessageType,
 )
-from app.models.base import AppBaseModelMixin
+from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
     from .courses_model import Course
     from .user_model import Account
 
 
-class ChatBase(SQLModel):
+class ChatBase(AppSQLModel):
     chat_type: ChatType = Field(index=True)
     name: Optional[str] = Field(max_length=255, default=None)  # For group chats
     description: Optional[str] = None  # For group chats
@@ -65,7 +65,7 @@ class Chat(AppBaseModelMixin, ChatBase, table=True):
         }
 
 
-class ChatMemberBase(SQLModel):
+class ChatMemberBase(AppSQLModel):
     role: MemberRole = Field(default=MemberRole.MEMBER)
     status: MemberStatus = Field(default=MemberStatus.ACTIVE)
     joined_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
@@ -119,7 +119,7 @@ class ChatMember(AppBaseModelMixin, ChatMemberBase, table=True):
         }
 
 
-class MessageBase(SQLModel):
+class MessageBase(AppSQLModel):
     message_type: MessageType = Field(default=MessageType.TEXT, index=True)
     content: Optional[str] = None  # Text content
     file_url: Optional[str] = Field(max_length=500, default=None)  # For files/images
@@ -185,7 +185,7 @@ class Message(AppBaseModelMixin, MessageBase, table=True):
         }
 
 
-class MessageReactionBase(SQLModel):
+class MessageReactionBase(AppSQLModel):
     emoji: str = Field(max_length=10)  # Emoji unicode or shortcode
 
 
@@ -217,7 +217,7 @@ class MessageReaction(AppBaseModelMixin, MessageReactionBase, table=True):
         }
 
 
-class ChatInviteBase(SQLModel):
+class ChatInviteBase(AppSQLModel):
     invite_code: Optional[str] = Field(
         max_length=50, unique=True, index=True, default=None
     )  # Public invite link
@@ -254,7 +254,7 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
         }
 
 
-# class ChatRead(SQLModel):
+# class ChatRead(AppSQLModel):
 #     id: int
 #     chat_type: ChatType
 #     name: Optional[str]
@@ -275,7 +275,7 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 #     unread_count: Optional[int] = None  # For the requesting user
 
 
-# class ChatMemberRead(SQLModel):
+# class ChatMemberRead(AppSQLModel):
 #     id: int
 #     account_id: int
 #     role: MemberRole
@@ -286,7 +286,7 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 #     is_pinned: bool
 
 
-# class MessageRead(SQLModel):
+# class MessageRead(AppSQLModel):
 #     id: int
 #     chat_id: int
 #     sender_id: Optional[int]
@@ -308,14 +308,14 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 #     reply_to: Optional["MessageRead"] = None
 
 
-# class MessageReactionRead(SQLModel):
+# class MessageReactionRead(AppSQLModel):
 #     id: int
 #     account_id: int
 #     emoji: str
 #     created_at: datetime
 
 
-# class ChatInviteRead(SQLModel):
+# class ChatInviteRead(AppSQLModel):
 #     id: int
 #     chat_id: int
 #     invited_by: int
@@ -329,11 +329,11 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 
 
 # # Chat API Models (Create/Update)
-# class DirectChatCreate(SQLModel):
+# class DirectChatCreate(AppSQLModel):
 #     participant_account_id: int  # The other user in the direct chat
 
 
-# class GroupChatCreate(SQLModel):
+# class GroupChatCreate(AppSQLModel):
 #     name: str = Field(min_length=1, max_length=255)
 #     description: Optional[str] = None
 #     privacy: GroupChatPrivacy = GroupChatPrivacy.PRIVATE
@@ -342,7 +342,7 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 #     avatar_url: Optional[str] = None
 
 
-# class GroupChatUpdate(SQLModel):
+# class GroupChatUpdate(AppSQLModel):
 #     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
 #     description: Optional[str] = None
 #     privacy: Optional[GroupChatPrivacy] = None
@@ -350,7 +350,7 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 #     avatar_url: Optional[str] = None
 
 
-# class MessageCreate(SQLModel):
+# class MessageCreate(AppSQLModel):
 #     content: Optional[str] = None
 #     message_type: MessageType = MessageType.TEXT
 #     file_url: Optional[str] = None
@@ -360,34 +360,34 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 #     reply_to_id: Optional[int] = None
 
 
-# class MessageUpdate(SQLModel):
+# class MessageUpdate(AppSQLModel):
 #     content: Optional[str] = None
 
 
-# class ChatMemberUpdate(SQLModel):
+# class ChatMemberUpdate(AppSQLModel):
 #     role: Optional[MemberRole] = None
 #     notifications_enabled: Optional[bool] = None
 #     is_pinned: Optional[bool] = None
 
 
-# class ChatInviteCreate(SQLModel):
+# class ChatInviteCreate(AppSQLModel):
 #     invited_account_id: Optional[int] = None  # For specific user invites
 #     max_uses: Optional[int] = Field(default=None, ge=1, le=1000)
 #     expires_at: Optional[datetime] = None
 
 
-# class MessageReactionCreate(SQLModel):
+# class MessageReactionCreate(AppSQLModel):
 #     emoji: str = Field(min_length=1, max_length=10)
 
 
 # # Specialized response models
-# class ChatlistResponse(SQLModel):
+# class ChatlistResponse(AppSQLModel):
 #     chats: list[ChatWithMembers]
 #     total: int
 #     has_more: bool
 
 
-# class MessagelistResponse(SQLModel):
+# class MessagelistResponse(AppSQLModel):
 #     messages: list[MessageWithReactions]
 #     total: int
 #     has_more: bool
@@ -395,7 +395,7 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 #     newest_message_id: Optional[int] = None
 
 
-# class ChatMemberlistResponse(SQLModel):
+# class ChatMemberlistResponse(AppSQLModel):
 #     members: list[ChatMemberRead]
 #     total: int
 #     admins_count: int

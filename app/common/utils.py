@@ -1,14 +1,18 @@
+import base64
+import hashlib
 import json
 import random
 import re
 import string
 import unicodedata
 from typing import Any, List, Optional, TypeVar, Union
+from urllib.parse import urljoin, urlparse
 
+from cryptography.fernet import Fernet
 from sqlalchemy import Select, func
 from sqlmodel import Session, SQLModel, select
 
-from app.common.constants import PER_PAGE
+from app.common.constants import PER_PAGE, SECRET_KEY
 from app.models.user_model import Account
 
 
@@ -131,3 +135,32 @@ def slugify(data: str, max_length: Optional[int] = None) -> str:
         s = s[:max_length].rstrip("-")
 
     return s or "n-a"
+
+
+def encode_state(data: dict[str, Any]) -> str:
+    """Encode state data as a base64 JSON string"""
+    json_str = json.dumps(data)
+    encoded = base64.urlsafe_b64encode(json_str.encode()).decode()
+    return encoded
+
+
+def decode_state(state: str) -> dict[str, Any]:
+    """Decode state data from base64 JSON string"""
+    try:
+        json_str = base64.urlsafe_b64decode(state.encode()).decode()
+        return json.loads(json_str)
+    except Exception:
+        return {}
+
+
+def extract_redirect_uri(redirect: str, base_url: str):
+    url = urlparse(redirect)
+    redirect = urljoin(base_url, url.path) + f"?{url.query}"
+    if url.fragment:
+        return redirect + f"#{url.fragment}"
+
+    return redirect
+
+
+def accepted_mime():
+    pass

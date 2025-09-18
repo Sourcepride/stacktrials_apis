@@ -131,3 +131,13 @@ class MemberStatus(str, Enum):
 
 class SortCoursesBy(str, Enum):
     MOST_ENROLLED = "most_enrolled"
+    TOP_RATED = "top_rated"
+    RECENT = "recent"
+
+
+class MediaType(str, Enum):
+    IMAGE = "image"
+    PDF = "pdf"
+    DOCUMENT = "document"  # Word, PowerPoint, etc.
+    VIDEO = "video"
+    OTHER = "other"

@@ -23,7 +23,7 @@ from app.common.enum import (
     VideoPlatform,
     VisibilityType,
 )
-from app.models.base import AppBaseModelMixin
+from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
     from .chat_model import Chat
@@ -41,14 +41,14 @@ class CourseTag(AppBaseModelMixin, SQLModel, table=True):
     __table_args__ = (Index("idx_course_tags_lookup", "course_id", "tag_id"),)
 
 
-class CourseBase(SQLModel):
+class CourseBase(AppSQLModel):
     title: str = Field(max_length=255, index=True, description="add course title")
     image: Optional[str] = None
     description: Optional[str] = Field(
         default=None, description="course description in full (markdown support)"
     )
     short_description: Optional[str] = Field(
-        default=None, description="a short description"
+        default=None, description="a short description", max_length=225
     )
     learning_objectives: Optional[list[str]] = Field(
         default=None,
@@ -108,7 +108,7 @@ class Course(AppBaseModelMixin, CourseBase, table=True):
     tags: list["Tag"] = Relationship(back_populates="courses", link_model=CourseTag)
 
 
-class TagBase(SQLModel):
+class TagBase(AppSQLModel):
     name: str = Field(
         max_length=50,
         index=True,
@@ -124,7 +124,7 @@ class Tag(AppBaseModelMixin, TagBase, table=True):
     courses: list["Course"] = Relationship(back_populates="tags", link_model=CourseTag)
 
 
-class SectionBase(SQLModel):
+class SectionBase(AppSQLModel):
     title: str = Field(max_length=255)
     description: Optional[str] = None
     learning_objectives: Optional[list[str]] = Field(
@@ -155,7 +155,7 @@ class Section(AppBaseModelMixin, SectionBase, table=True):
     )
 
 
-class ModuleBase(SQLModel):
+class ModuleBase(AppSQLModel):
     title: str = Field(max_length=255)
     description: Optional[str] = None
 
@@ -202,13 +202,15 @@ class Module(AppBaseModelMixin, ModuleBase, table=True):
     )
 
 
-class ModuleAttachmentBase(SQLModel):
+class ModuleAttachmentBase(AppSQLModel):
     attachment_type: AttachmentType
     file_url: str = Field(max_length=500)
     external_file_id: Optional[str] = Field(max_length=255, default=None, index=True)
     embed_url: Optional[str] = Field(max_length=500, default=None)
     title: Optional[str] = None
     description: Optional[str] = None
+    document_type: Optional[DocumentPlatform] = Field(default=None)
+    file_type: Optional[str] = Field(max_length=50, default=None)
 
 
 class ModuleAttachment(AppBaseModelMixin, ModuleAttachmentBase, table=True):
@@ -221,7 +223,7 @@ class ModuleAttachment(AppBaseModelMixin, ModuleAttachmentBase, table=True):
     module: Module = Relationship(back_populates="attachments")
 
 
-class VideoContentBase(SQLModel):
+class VideoContentBase(AppSQLModel):
     platform: VideoPlatform
     external_video_id: str = Field(max_length=255, index=True)
     video_url: str = Field(max_length=500)
@@ -247,7 +249,7 @@ class VideoContent(AppBaseModelMixin, VideoContentBase, table=True):
     module: Module = Relationship(back_populates="video_content")
 
 
-class DocumentBase(SQLModel):
+class DocumentBase(AppSQLModel):
     platform: DocumentPlatform
     external_file_id: Optional[str] = Field(max_length=255, default=None, index=True)
     file_url: str = Field(max_length=500)
@@ -272,7 +274,7 @@ class DocumentContent(AppBaseModelMixin, DocumentBase, table=True):
     module: Module = Relationship(back_populates="document_content")
 
 
-class QuizContentBase(SQLModel):
+class QuizContentBase(AppSQLModel):
     quiz_settings: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )
@@ -299,7 +301,7 @@ class QuizContent(AppBaseModelMixin, QuizContentBase, table=True):
     )
 
 
-class QuizQuestionBase(SQLModel):
+class QuizQuestionBase(AppSQLModel):
     question_text: str
     question_type: QuestionType
     options: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
@@ -323,7 +325,7 @@ class QuizQuestion(AppBaseModelMixin, QuizQuestionBase, table=True):
     quiz: QuizContent = Relationship(back_populates="questions")
 
 
-class CourseEnrollmentBase(SQLModel):
+class CourseEnrollmentBase(AppSQLModel):
     status: EnrollmentStatus = Field(default=EnrollmentStatus.ACTIVE, index=True)
 
 
@@ -361,7 +363,7 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
         }
 
 
-class CourseProgressBase(SQLModel):
+class CourseProgressBase(AppSQLModel):
     status: ModuleProgressStatus = Field(
         default=ModuleProgressStatus.NOT_STARTED, index=True
     )
@@ -403,7 +405,7 @@ class CourseProgress(AppBaseModelMixin, CourseProgressBase, table=True):
         }
 
 
-class QuizAttemptBase(SQLModel):
+class QuizAttemptBase(AppSQLModel):
     attempt_number: int = Field(ge=1)
     start_time: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
     completion_time: Optional[datetime] = None

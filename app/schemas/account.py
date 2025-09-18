@@ -11,8 +11,19 @@ class AccountRead(AccountBase):
     profile: Optional[Profile] = None
 
 
-class Token(BaseModel):
+class RefreshToken(BaseModel):
+    refresh_token: str
+
+
+class AccessToken(BaseModel):
     access_token: str
+
+
+class ShortLived(AccessToken):
+    expires_in: int
+
+
+class Token(AccessToken):
     refresh_token: str
     token_type: str
     expires_in: int
@@ -27,3 +38,7 @@ class ProfileInformation(ProfileBase):
     id: uuid.UUID
     account_id: str
     username: str
+
+
+class GoogleTokenPayload(BaseModel):
+    credential: str

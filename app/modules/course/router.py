@@ -5,7 +5,7 @@ from fastapi.background import P
 from typing_extensions import Annotated
 
 from app.common.enum import DifficultyLevel, SortCoursesBy
-from app.core.dependencies import CurrentActiveUser, SessionDep
+from app.core.dependencies import CurrentActiveUser, CurrentActiveUserSilent, SessionDep
 from app.modules.course.service import CourseService
 from app.schemas.courses import (
     CourseCommentCreate,
@@ -50,9 +50,12 @@ async def list_courses(
         SortCoursesBy | None, Query(description="sort by (value:  most_enrolled)")
     ] = None,
     level: Annotated[DifficultyLevel | None, Query()] = None,
+    language: Annotated[str | None, Query()] = None,
     page: int | None = None,
 ):
-    return await CourseService.list_courses(q, sort, level, session, page or 1)
+    return await CourseService.list_courses(
+        q, sort, level, session, language, page or 1
+    )
 
 
 @router.get("/tags/{name}", response_model=PaginatedCourse)
@@ -210,7 +213,7 @@ async def remove_attachment(
     return await CourseService.remove_course_attachments(session, id, current_user)
 
 
-@router.get("/enroll", response_model=CourseEnrollmentRead)
+@router.post("/enroll", response_model=CourseEnrollmentRead)
 async def create_enrollment(
     data: Annotated[CourseEnrollmentCreate, Body()],
     session: SessionDep,
@@ -247,6 +250,15 @@ async def update_comment(
     return await CourseService.update_comment(session, id, data, current_user)
 
 
+@router.get("/{course_id}/enroll", response_model=CourseEnrollmentRead)
+async def get_enrollment(
+    course_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    return await CourseService.get_enrollment(course_id, session, current_user)
+
+
 @router.get("/{course_id}/ratings", response_model=PaginatedRatings)
 async def list_ratings(
     course_id: str, session: SessionDep, page: Annotated[int | None, Query()] = None
@@ -256,27 +268,47 @@ async def list_ratings(
 
 @router.get("/{course_id}/comments", response_model=PaginatedComments)
 async def list_comments(
-    course_id: str, session: SessionDep, page: Annotated[int | None, Query()] = None
-):
-    return await CourseService.list_comments(course_id, session, page or 1)
-
-
-@router.get("/{course_id}/{slug}", response_model=CourseRead)
-async def course_detail(course_id: str, slug: str, session: SessionDep):
-    return await CourseService.course_detail(session, course_id, slug)
-
-
-@router.patch("/{course_id}/{course_slug}", response_model=CourseRead)
-async def update_course(
     course_id: str,
-    course_slug: str,
     session: SessionDep,
-    data: Annotated[CourseUpdate, Body()],
-    current_user: CurrentActiveUser,
+    current_user: CurrentActiveUserSilent,
+    page: Annotated[int | None, Query()] = None,
 ):
-    return await CourseService.update_course(
-        session, course_id, course_slug, data, current_user
+    return await CourseService.list_comments(
+        course_id, session, page or 1, current_user
     )
+
+
+@router.get("/{comment_id}/replies", response_model=PaginatedComments)
+async def list_replies(
+    comment_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUserSilent,
+    page: Annotated[int | None, Query()] = None,
+):
+    return await CourseService.list_replies(
+        comment_id, session, page or 1, current_user
+    )
+
+
+@router.patch("/{comment_id}/like-unlike")
+async def like_unlike(
+    comment_id: str, session: SessionDep, current_user: CurrentActiveUser
+):
+    return await CourseService.like_unlike(comment_id, session, current_user)
+
+
+@router.get("/{slug}/content/minimal", response_model=CourseContentReadMin)
+async def course_content(slug: str, session: SessionDep):
+    # open to everyone
+    return await CourseService.course_content(session, slug)
+
+
+@router.get("/{slug}/content/full", response_model=CourseContentReadFull)
+async def full_course_content(
+    slug: str, session: SessionDep, curren_user: CurrentActiveUser
+):
+    # user must have enrolled first
+    return await CourseService.course_content_full(session, slug, curren_user)
 
 
 @router.delete("/{course_id}/{course_slug}", status_code=204)
@@ -284,17 +316,16 @@ async def delete_course(course_id: str, course_slug: str, session: SessionDep):
     return
 
 
-@router.get("/{course_id}/{slug}/content/minmal", response_model=CourseContentReadMin)
-async def course_content(course_id: str, slug: str, session: SessionDep):
-    # open to everyone
-    return await CourseService.course_content(session, course_id, slug)
+@router.get("/{slug}", response_model=CourseRead)
+async def course_detail(slug: str, session: SessionDep):
+    return await CourseService.course_detail(session, slug)
 
 
-@router.get("/{course_id}/{slug}/content/full", response_model=CourseContentReadFull)
-async def full_course_content(
-    course_id: str, slug: str, session: SessionDep, curren_user: CurrentActiveUser
+@router.patch("/{course_slug}", response_model=CourseRead)
+async def update_course(
+    course_slug: str,
+    session: SessionDep,
+    data: Annotated[CourseUpdate, Body()],
+    current_user: CurrentActiveUser,
 ):
-    # user must have enrolled first
-    return await CourseService.course_content_full(
-        session, course_id, slug, curren_user
-    )
+    return await CourseService.update_course(session, course_slug, data, current_user)

@@ -1,9 +1,12 @@
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import jwt
 from authlib.integrations.starlette_client import OAuth
 from fastapi import HTTPException
+from google.auth.transport import requests
+from google.oauth2 import id_token
 
 from app.common.constants import (
     ACCESS_TOKEN_MINUTES,
@@ -46,7 +49,7 @@ oauth.register(
     access_token_url="https://api.dropboxapi.com/oauth2/token",
     api_base_url="https://api.dropboxapi.com/2/",
     client_kwargs={
-        "scope": "files.metadata.read files.content.write account_info.read"
+        "scope": "files.metadata.read files.content.write account_info.read files.metadata.write files.content.read sharing.write sharing.read"
     },
 )
 

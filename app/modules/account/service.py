@@ -6,6 +6,13 @@ from app.models.user_model import Account, Profile
 from app.schemas.account import ProfileInformation, ProfileUpdate
 
 
+async def my_account(session: Session, current_user: Account):
+
+    session.refresh(current_user)
+
+    return current_user
+
+
 async def get_profile(u: str, session: Session):
     result = session.exec(
         select(Profile, Account.username).join(Account).where(Account.username == u)

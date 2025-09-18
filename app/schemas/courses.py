@@ -1,7 +1,9 @@
+import re
 import uuid
+from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, validator
 
 from app.common.enum import ModuleType, ProgressionType
 from app.models.comments_model import CommentBase, RatingBase
@@ -18,20 +20,26 @@ from app.models.courses_model import (
     SectionBase,
     VideoContentBase,
 )
-from app.models.user_model import Account
+from app.models.user_model import Account, AccountBase, Profile
 from app.schemas.base import PaginatedSchema
+
+
+class AccountRead(AccountBase):
+    id: uuid.UUID
+    profile: Optional["Profile"] = None
 
 
 class CourseRead(CourseBase):
     id: str
     slug: str
     account_id: Optional[uuid.UUID] = None
-    author: Optional["Account"] = None
+    author: Optional["AccountRead"] = None
     average_rating: float
     total_rating: int
     stars: int
     enrollment_count: int
     comment_count: int
+    updated_at: datetime
 
 
 class PaginatedCourse(PaginatedSchema):
@@ -91,6 +99,7 @@ class ModuleAttachmentRead(ModuleAttachmentBase):
 class ModuleReadMin(ModuleBase):
     id: uuid.UUID
     section_id: uuid.UUID
+    module_type: ModuleType
 
 
 class ModuleRead(ModuleBase):
@@ -172,6 +181,7 @@ class CourseRatingRead(RatingBase):
     course_id: str
     comment_id: Optional[uuid.UUID]
     comment: Optional["CourseCommentRead"] = None
+    created_at: datetime
 
 
 class PaginatedRatings(PaginatedSchema):
@@ -184,12 +194,18 @@ class CourseRatingCreate(RatingBase):
 
 class CourseCommentRead(CommentBase):
     id: uuid.UUID
+    account: "AccountRead"
     creator_id: uuid.UUID
     course_id: str
     reply_to_id: Optional[uuid.UUID]
     mention_id: Optional[uuid.UUID]
     reply_to: Optional[CommentBase] = None
-    mention: Optional[Account] = None
+    mention: Optional[AccountRead] = None
+    created_at: datetime
+    likes: int
+    comment_count: int
+    is_rating: bool
+    is_liked: Optional[bool] = False
 
 
 class PaginatedComments(PaginatedSchema):

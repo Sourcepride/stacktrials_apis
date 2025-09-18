@@ -5,16 +5,16 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
-from app.models.base import AppBaseModelMixin
+from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
     from .chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
-    from .comments_model import Comment, Rating
+    from .comments_model import Comment, CommentLike, Rating
     from .courses_model import Course, CourseEnrollment, CourseProgress, QuizAttempt
     from .provider_model import Provider
 
 
-class AccountBase(SQLModel):
+class AccountBase(AppSQLModel):
     email: str = Field(index=True, unique=True)
     username: Optional[str] = Field(
         index=True, unique=True, nullable=True, default=None
@@ -71,9 +71,13 @@ class Account(AppBaseModelMixin, AccountBase, table=True):
         sa_relationship_kwargs={"foreign_keys": "[Comment.mention_id]"},
         passive_deletes="all",
     )
+    comment_likes: list["CommentLike"] = Relationship(
+        back_populates="account",
+        sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
 
 
-class ProfileBase(SQLModel):
+class ProfileBase(AppSQLModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar: Optional[str] = None
