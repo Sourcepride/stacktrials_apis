@@ -82,7 +82,7 @@ async def google_one_tab(
 
 
 @router.get("/github/login")
-async def github_login(request: Request, redirect: Annotated[Optional[bool], Query()]):
+async def github_login(request: Request, redirect: Annotated[Optional[str], Query()]):
     state_data = {}
     if redirect:
         state_data["redirect"] = redirect
@@ -105,7 +105,7 @@ async def github_callback(
     redis: RedisDep,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return github_callback_handler(request, session, state, user, redis)
+    return await github_callback_handler(request, session, state, user, redis)
 
 
 @router.get("/providers/dropbox/login", description="add dropbox storage")

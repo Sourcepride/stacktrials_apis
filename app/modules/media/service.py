@@ -531,21 +531,19 @@ class DropBoxStorageService(StorageService):
             res.raise_for_status()
 
             data = self.normalize_response(res.json())
+
             if mime_type:
                 if isinstance(mime_type, (list, tuple)):
 
                     return [
                         entry
                         for entry in data
-                        if DocumentUrlConverter.detect_media_type(
-                            entry.name.split(".")[-1]
-                        )
-                        in mime_type
+                        if f".{entry.name.split(".")[-1]}".lower() in mime_type
                     ]
                 return [
                     entry
                     for entry in data
-                    if DocumentUrlConverter.detect_media_type(mime_type) in mime_type
+                    if entry.name.split(".")[-1].lower() == mime_type[1:]
                 ]
 
             return data

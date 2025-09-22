@@ -227,6 +227,7 @@ class VideoContentBase(AppSQLModel):
     platform: VideoPlatform
     external_video_id: str = Field(max_length=255, index=True)
     video_url: str = Field(max_length=500)
+    embed_url: Optional[str] = Field(max_length=500, default=None)
     thumbnail_url: Optional[str] = Field(max_length=500, default=None)
     duration_seconds: Optional[int] = None
     title: Optional[str] = Field(max_length=255, default=None)

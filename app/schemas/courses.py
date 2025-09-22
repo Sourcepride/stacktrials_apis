@@ -49,6 +49,8 @@ class PaginatedCourse(PaginatedSchema):
 class CourseCreate(CourseBase):
     tags: list[str] = []
 
+    # TODO:  validate image...  images must come from trusted sources
+
 
 class CourseUpdate(CourseBase):
     pass
@@ -235,6 +237,7 @@ class CourseContentReadMin(CourseRead):
 
 class SectionContentReadFull(SectionRead):
     modules: list[ModuleRead]
+    course: CourseRead
 
 
 class CourseContentReadFull(CourseContentReadMin):

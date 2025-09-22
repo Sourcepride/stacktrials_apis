@@ -17,7 +17,7 @@ from app.common.enum import (
     VisibilityType,
 )
 from app.common.utils import paginate, slugify
-from app.core.dependencies import CurrentActiveUser
+from app.core.dependencies import CurrentActiveUser, CurrentActiveUserSilent
 from app.models.comments_model import Comment, CommentLike, Rating
 from app.models.courses_model import (
     Course,
@@ -154,12 +154,7 @@ class CourseService:
     async def update_course(
         session: Session, slug: str, data: CourseUpdate, current_user: Account
     ):
-        course = CourseService._get_course_or_404(slug, session)
-
-        if course.account_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
-            )
+        course = CourseService._get_course_or_404(slug, session, current_user)
 
         cleaned_data = data.model_dump(exclude_unset=True)
         slug = course.slug
@@ -176,8 +171,10 @@ class CourseService:
         return course
 
     @staticmethod
-    async def course_detail(session: Session, slug: str):
-        course = CourseService._get_course_or_404(slug, session)
+    async def course_detail(
+        session: Session, slug: str, currentUser: Optional[Account] = None
+    ):
+        course = CourseService._get_course_or_404(slug, session, currentUser)
 
         return course
 
@@ -188,7 +185,7 @@ class CourseService:
 
     @staticmethod
     async def course_content_full(session: Session, slug: str, current_user: Account):
-        course = CourseService._get_course_or_404(slug, session)
+        course = CourseService._get_course_or_404(slug, session, current_user)
         course_enrollment = session.exec(
             select(CourseEnrollment).where(
                 CourseEnrollment.course_id == course.id,
@@ -942,10 +939,19 @@ class CourseService:
             )
 
     @staticmethod
-    def _get_course_or_404(slug: str, session: Session):
+    def _get_course_or_404(
+        slug: str, session: Session, currentUser: Optional[Account] = None
+    ):
         course = session.exec(select(Course).where(Course.slug == slug)).first()
+
         if not course:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "course not found")
+
+        if currentUser and currentUser.id == course.account_id:
+            return course
+        if course.status.value == "draft" or course.status.value == "archived":
+            raise HTTPException(status.HTTP_403_FORBIDDEN)
+
         return course
 
     @staticmethod

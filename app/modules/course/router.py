@@ -31,6 +31,7 @@ from app.schemas.courses import (
     PaginatedComments,
     PaginatedCourse,
     PaginatedRatings,
+    SectionContentReadFull,
     SectionCreate,
     SectionRead,
     SectionUpdate,
@@ -77,7 +78,7 @@ async def create_course(
     return await CourseService.create_course(session, data, current_user)
 
 
-@router.post("/section", response_model=SectionRead, status_code=201)
+@router.post("/section", response_model=SectionContentReadFull, status_code=201)
 async def create_section(
     data: Annotated[SectionCreate, Body()],
     session: SessionDep,
@@ -86,7 +87,7 @@ async def create_section(
     return await CourseService.create_section(session, data, current_user)
 
 
-@router.patch("/section/{section_id}", response_model=SectionRead)
+@router.patch("/section/{section_id}", response_model=SectionContentReadFull)
 async def update_section(
     section_id: str,
     data: Annotated[SectionUpdate, Body()],
@@ -103,7 +104,7 @@ async def delete_section(
     return await CourseService.delete_section(session, section_id, current_user)
 
 
-@router.get("/section/{section_id}", response_model=SectionRead)
+@router.get("/section/{section_id}", response_model=SectionContentReadFull)
 async def get_section(section_id: str, session: SessionDep):
     return await CourseService.get_section(session, section_id)
 
@@ -305,10 +306,10 @@ async def course_content(slug: str, session: SessionDep):
 
 @router.get("/{slug}/content/full", response_model=CourseContentReadFull)
 async def full_course_content(
-    slug: str, session: SessionDep, curren_user: CurrentActiveUser
+    slug: str, session: SessionDep, current_user: CurrentActiveUser
 ):
     # user must have enrolled first
-    return await CourseService.course_content_full(session, slug, curren_user)
+    return await CourseService.course_content_full(session, slug, current_user)
 
 
 @router.delete("/{course_id}/{course_slug}", status_code=204)
@@ -317,8 +318,10 @@ async def delete_course(course_id: str, course_slug: str, session: SessionDep):
 
 
 @router.get("/{slug}", response_model=CourseRead)
-async def course_detail(slug: str, session: SessionDep):
-    return await CourseService.course_detail(session, slug)
+async def course_detail(
+    slug: str, session: SessionDep, currentUser: CurrentActiveUserSilent
+):
+    return await CourseService.course_detail(session, slug, currentUser)
 
 
 @router.patch("/{course_slug}", response_model=CourseRead)
