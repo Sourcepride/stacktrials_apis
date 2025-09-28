@@ -10,7 +10,6 @@ from app.core.dependencies import (
     CurrentActiveUserSilent,
     RedisDep,
     SessionDep,
-    get_current_active_user,
 )
 from app.core.security import oauth, sign_state
 from app.schemas.account import (
@@ -75,10 +74,10 @@ async def google_callback(
 @router.post("/google-one-tap", response_model=Token)
 async def google_one_tab(
     token: Annotated[GoogleTokenPayload, Form()],
-    response: Response,
     session: SessionDep,
 ):
-    return await google_one_tap(response, token.credential, session)
+
+    return await google_one_tap(token.credential, session, token.redirect)
 
 
 @router.get("/github/login")

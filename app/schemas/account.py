@@ -42,3 +42,4 @@ class ProfileInformation(ProfileBase):
 
 class GoogleTokenPayload(BaseModel):
     credential: str
+    redirect: Optional[str]

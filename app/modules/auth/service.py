@@ -39,7 +39,7 @@ from app.models.user_model import Account, Profile
 from app.schemas.account import AccessToken, RefreshToken
 
 
-async def google_one_tap(response: Response, id_token: str, session: Session):
+async def google_one_tap(id_token: str, session: Session, redirect: str | None = None):
     userinfo = verify_google_auth_token(id_token)
     email = userinfo["email"]
     sub = userinfo["sub"]
@@ -50,7 +50,7 @@ async def google_one_tap(response: Response, id_token: str, session: Session):
         Providers.GOOGLE,
         sub,
         "openid email profile",
-        {"redirect": "/"},
+        {"redirect": redirect or "/en"},
     )
 
 
@@ -273,17 +273,28 @@ async def google_incremental_auth(
 
     if needed_scopes.issubset(user_scopes):
         # Already has scopes, just return token
-        token_data = await get_google_access_token_from_refresh(current_user, session)
-        if redirect:
-            return RedirectResponse(
-                extract_redirect_uri(redirect, FRONTEND_URL), status_code=303
+
+        try:
+            token_data = await get_google_access_token_from_refresh(
+                current_user, session
             )
-        return JSONResponse(
-            {
-                "access_token": token_data["access_token"],
-                "expires_in": token_data["expires_in"],
-            }
-        )
+            if redirect:
+                return RedirectResponse(
+                    extract_redirect_uri(redirect, FRONTEND_URL), status_code=303
+                )
+            return JSONResponse(
+                {
+                    "access_token": token_data["access_token"],
+                    "expires_in": token_data["expires_in"],
+                }
+            )
+        except HTTPException as e:
+            if not (
+                e.status_code == 400
+                and isinstance(e.detail, dict)
+                and e.detail.get("error") == "invalid_grant"
+            ):
+                raise e
 
     csrf_token = secrets.token_hex(32)
 
@@ -475,6 +486,11 @@ def authorize_or_register(
         secure = not IS_DEV
         samesite = "lax"
         cookie_domain = "localhost" if IS_DEV else None
+
+        print(
+            state.get("redirect"),
+            extract_redirect_uri(state.get("redirect", ""), FRONTEND_URL),
+        )
 
         redirect_response = RedirectResponse(
             url=extract_redirect_uri(state.get("redirect", ""), FRONTEND_URL),
