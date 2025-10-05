@@ -50,6 +50,7 @@ class DocumentItem(BaseModel):
             r"1drv\.ms",
             r"sharepoint\.com",
             r"dropbox\.com",
+            r"dl\.dropboxusercontent\.com",
         ]
 
         if not any(

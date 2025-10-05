@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
 from fastapi import HTTPException, status
+from pydantic import HttpUrl
 from sqlalchemy import BinaryExpression, text
 from sqlmodel import Session, asc, col, desc, func, select, update
 
@@ -10,10 +11,13 @@ from app.common.constants import PER_PAGE
 from app.common.enum import (
     CourseStatus,
     DifficultyLevel,
+    DocumentPlatform,
     EnrollmentType,
+    MediaType,
     ModuleProgressStatus,
     ModuleType,
     SortCoursesBy,
+    VideoPlatform,
     VisibilityType,
 )
 from app.common.utils import paginate, slugify
@@ -33,6 +37,8 @@ from app.models.courses_model import (
 )
 from app.models.user_model import Account
 from app.modules import course
+from app.modules.media.router import validate_document_url
+from app.modules.media.service import URLValidator
 from app.schemas.courses import (
     CourseCommentCreate,
     CourseCommentRead,
@@ -51,6 +57,7 @@ from app.schemas.courses import (
     VideoContentCreate,
     VideoContentUpdate,
 )
+from app.schemas.media import DocumentItem
 
 
 class CourseService:
@@ -375,6 +382,22 @@ class CourseService:
         return module
 
     @staticmethod
+    async def get_full_module(session: Session, module_id: str, current_user: Account):
+        module = session.get(Module, module_id)
+
+        if not module:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="module not found"
+            )
+
+        if module.section.course.account_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
+            )
+
+        return module
+
+    @staticmethod
     async def create_video(
         session: Session, data: VideoContentCreate, current_user: Account
     ):
@@ -382,9 +405,13 @@ class CourseService:
         await CourseService._run_module_checks(
             session, data.module_id, current_user.id, ModuleType.VIDEO
         )
+        validator_resp = await CourseService._validate_video(
+            data.video_url, data.platform
+        )
 
         cleaned_data = data.model_dump(exclude_unset=True)
         video = VideoContent(**cleaned_data)
+        video.embed_url = validator_resp.embed_url
 
         session.add(video)
         session.commit()
@@ -406,8 +433,13 @@ class CourseService:
             session, video.module_id, current_user.id, ModuleType.VIDEO
         )
 
+        validator_resp = await CourseService._validate_video(
+            data.video_url or video.video_url, data.platform or video.platform
+        )
+
         cleaned_data = data.model_dump(exclude_unset=True)
         video.sqlmodel_update(cleaned_data)
+        video.embed_url = validator_resp.embed_url
 
         session.add(video)
         session.commit()
@@ -435,18 +467,32 @@ class CourseService:
         session: Session, data: DocumentContentCreate, current_user: Account
     ):
 
-        await CourseService._run_module_checks(
-            session, data.module_id, current_user.id, ModuleType.DOCUMENT
-        )
+        try:
+            await CourseService._run_module_checks(
+                session, data.module_id, current_user.id, ModuleType.DOCUMENT
+            )
 
-        cleaned_data = data.model_dump(exclude_unset=True)
-        doc = DocumentContent(**cleaned_data)
+            print(data)
 
-        session.add(doc)
-        session.commit()
-        session.refresh(doc)
+            validator_resp = await CourseService._validate_document(
+                data.file_url, data.platform
+            )
 
-        return doc
+            print("====================", validator_resp)
+
+            cleaned_data = data.model_dump(exclude_unset=True)
+            doc = DocumentContent(**cleaned_data)
+            doc.embed_url = validator_resp.embed_url
+            doc.file_size_bytes = validator_resp.file_size
+
+            session.add(doc)
+            session.commit()
+            session.refresh(doc)
+
+            return doc
+        except Exception as e:
+            print("*******", e)
+            raise e
 
     @staticmethod
     async def update_document(
@@ -462,8 +508,14 @@ class CourseService:
             session, doc.module_id, current_user.id, ModuleType.DOCUMENT
         )
 
+        validator_resp = await CourseService._validate_document(
+            data.file_url or doc.file_url, data.platform or doc.platform
+        )
+
         cleaned_data = data.model_dump(exclude_unset=True)
         doc.sqlmodel_update(cleaned_data)
+        doc.embed_url = validator_resp.embed_url
+        doc.file_size_bytes = validator_resp.file_size
 
         session.add(doc)
         session.commit()
@@ -1009,3 +1061,43 @@ class CourseService:
         except Exception as e:
             session.rollback()
             raise e
+
+    @staticmethod
+    async def _validate_video(video_url: str, platform: VideoPlatform):
+        provider = DocumentPlatform.DROPBOX
+        if platform == VideoPlatform.YOUTUBE or platform == VideoPlatform.DAILYMOTION:
+            provider = DocumentPlatform.DIRECT_LINK
+        elif platform == VideoPlatform.GOOGLE_DRIVE:
+            provider = DocumentPlatform.GOOGLE_DRIVE
+
+        validator_resp = await URLValidator.validate_url_resource(
+            DocumentItem(
+                url=HttpUrl(video_url),
+                provider=provider,
+                media_type=MediaType.VIDEO,
+            )
+        )
+
+        if not validator_resp.is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid video"
+            )
+
+        return validator_resp
+
+    @staticmethod
+    async def _validate_document(file_url: str, platform: DocumentPlatform):
+        validator_resp = await URLValidator.validate_url_resource(
+            DocumentItem(
+                url=HttpUrl(file_url),
+                provider=platform,
+                media_type=MediaType.DOCUMENT,
+            )
+        )
+
+        if not validator_resp.is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid document"
+            )
+
+        return validator_resp

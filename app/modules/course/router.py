@@ -140,6 +140,13 @@ async def get_module(module_id: str, session: SessionDep):
     return await CourseService.get_module(session, module_id)
 
 
+@router.get("/module/full/{module_id}", response_model=ModuleRead)
+async def get_full_module(
+    module_id: str, session: SessionDep, current_user: CurrentActiveUser
+):
+    return await CourseService.get_full_module(session, module_id, current_user)
+
+
 @router.post("/video", response_model=VideoContentRead, status_code=201)
 async def create_video(
     data: Annotated[VideoContentCreate, Body()],
