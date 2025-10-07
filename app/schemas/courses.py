@@ -172,6 +172,8 @@ class CourseEnrollmentRead(CourseEnrollmentBase):
     id: uuid.UUID
     account_id: uuid.UUID
     course_id: str
+    completion_date: Optional[datetime]
+    progress_percentage: float
 
 
 class CourseEnrollmentCreate(CourseEnrollmentBase):
@@ -267,3 +269,12 @@ class IncrementProgress(BaseModel):
 class ToggleModuleCompleted(BaseModel):
     module_id: str
     status: bool
+
+
+class EnrolledCoursesResp(BaseModel):
+    course: CourseRead
+    enrollment: CourseEnrollmentRead
+
+
+class PaginatedEnrolledCourses(PaginatedSchema):
+    items: list[EnrolledCoursesResp]

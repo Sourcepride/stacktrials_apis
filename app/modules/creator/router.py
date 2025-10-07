@@ -4,16 +4,17 @@ from fastapi import APIRouter, Query
 
 from app.core.dependencies import CurrentActiveUser, SessionDep
 from app.modules.creator.service import CreatorService
+from app.schemas.courses import CreatorStat, PaginatedCourse
 
 router = APIRouter()
 
 
-@router.get("/courses/stats")
+@router.get("/courses/stats", response_model=CreatorStat)
 async def courses_stat(currentUser: CurrentActiveUser, session: SessionDep):
     return await CreatorService.course_stat(currentUser, session)
 
 
-@router.get("/created")
+@router.get("/created", response_model=PaginatedCourse)
 async def created(
     currentUser: CurrentActiveUser,
     session: SessionDep,

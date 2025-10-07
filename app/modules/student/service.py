@@ -50,7 +50,7 @@ class StudentService:
         current_user: Account, session: Session, page: int = 1, per_page: int = PER_PAGE
     ):
         enrolled = (
-            select(Course)
+            select(Course, CourseEnrollment)
             .join(CourseEnrollment)
             .where(CourseEnrollment.account_id == current_user.id)
             .order_by(desc(CourseEnrollment.enrollment_date))
@@ -58,25 +58,11 @@ class StudentService:
 
         results = paginate(session, enrolled, page, per_page)
 
-        items: list[Course] = list(results.get("items", []))
+        items: list[tuple[Course, CourseEnrollment]] = list(results.get("items", []))
 
-        ids = map(lambda x: x.id, items)
+        new_items = map(lambda x: {"course": x[0], "enrollment": x[1]}, items)
 
-        progress = session.exec(
-            select(CourseProgress).where(col(CourseProgress.id).in_(ids))
-        ).all()
-
-        updated_res = []
-
-        def _update(progress: CourseProgress):
-            for item in items:
-                if item.id == progress.course_id:
-                    return item
-
-        for value in filter(lambda x: x != None, map(_update, progress)):
-            updated_res.append(value)
-
-        results["items"] = updated_res
+        results["items"] = list(new_items)
 
         return results
 

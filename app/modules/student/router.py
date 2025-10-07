@@ -4,17 +4,24 @@ from typing_extensions import Annotated
 from app.core.dependencies import SessionDep
 from app.models.user_model import Account
 from app.modules.student.service import StudentService
-from app.schemas.courses import IncrementProgress, ToggleModuleCompleted
+from app.schemas.courses import (
+    CourseEnrollmentRead,
+    CourseProgressRead,
+    IncrementProgress,
+    LearnerStat,
+    PaginatedEnrolledCourses,
+    ToggleModuleCompleted,
+)
 
 router = APIRouter()
 
 
-@router.get("/enrolled")
+@router.get("/enrolled", response_model=PaginatedEnrolledCourses)
 async def enrolled(current_user: Account, session: SessionDep, page: int | None = None):
     return await StudentService.enrolled(current_user, session, page or 1)
 
 
-@router.post("/increment-progress")
+@router.post("/increment-progress", response_model=CourseProgressRead)
 async def increment_progress(
     current_user: Account,
     session: SessionDep,
@@ -25,7 +32,7 @@ async def increment_progress(
     )
 
 
-@router.post("/toggle-module-completed")
+@router.post("/toggle-module-completed", response_model=CourseEnrollmentRead)
 async def toggle_module_completed(
     current_user: Account,
     session: SessionDep,
@@ -36,6 +43,6 @@ async def toggle_module_completed(
     )
 
 
-@router.get("/dasboard")
+@router.get("/dasboard", response_model=LearnerStat)
 async def dashboard(current_user: Account, session: SessionDep):
     return await StudentService.dashboard_stats(current_user, session)
