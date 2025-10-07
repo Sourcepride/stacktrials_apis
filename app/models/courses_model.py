@@ -42,7 +42,9 @@ class CourseTag(AppBaseModelMixin, SQLModel, table=True):
 
 
 class CourseBase(AppSQLModel):
-    title: str = Field(max_length=255, index=True, description="add course title")
+    title: str = Field(
+        max_length=255, min_length=3, index=True, description="add course title"
+    )
     image: Optional[str] = None
     description: Optional[str] = Field(
         default=None, description="course description in full (markdown support)"
@@ -374,6 +376,8 @@ class CourseProgressBase(AppSQLModel):
     progress_data: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )
+    next_module: Optional[str] = Field(default=None)
+    next_section: Optional[str] = Field(default=None)
 
     current_streak: int = Field(default=0)
     longest_streak: int = Field(default=0)

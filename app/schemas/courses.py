@@ -53,7 +53,9 @@ class CourseCreate(CourseBase):
 
 
 class CourseUpdate(CourseBase):
-    pass
+    title: Optional[str] = None
+    language: Optional[str] = None
+    certification_enabled: Optional[bool] = None
 
 
 class SectionRead(SectionBase):
@@ -242,3 +244,26 @@ class SectionContentReadFull(SectionRead):
 
 class CourseContentReadFull(CourseContentReadMin):
     sections: list[SectionContentReadFull]
+
+
+class CreatorStat(BaseModel):
+    total_enrolled: int
+    total_reviews: int
+    total_comments: int
+    # average_rating :float
+    total_published: int
+
+
+class LearnerStat(BaseModel):
+    completed_courses: int
+    created_courses: int
+    in_progress: int
+
+
+class IncrementProgress(BaseModel):
+    module_id: str
+
+
+class ToggleModuleCompleted(BaseModel):
+    module_id: str
+    status: bool

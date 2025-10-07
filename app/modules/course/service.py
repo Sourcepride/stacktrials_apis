@@ -167,10 +167,11 @@ class CourseService:
         slug = course.slug
         title = cleaned_data.get("title", "")
 
-        if course.title != title:
+        if title and course.title != title:
             slug = CourseService._generate_course_slug(title, session)
 
         course.sqlmodel_update({**cleaned_data, "slug": slug})
+        course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(course)
         session.commit()
@@ -224,6 +225,7 @@ class CourseService:
         cleaned_data = data.model_dump(exclude_unset=True)
 
         section = Section(**cleaned_data)
+        course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(section)
         session.commit()
@@ -252,6 +254,7 @@ class CourseService:
 
         cleaned_data = data.model_dump(exclude_unset=True)
         section.sqlmodel_update(cleaned_data)
+        section.course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(section)
         session.commit()
@@ -315,6 +318,7 @@ class CourseService:
 
         cleaned_data = data.model_dump(exclude_unset=True)
         module = Module(**cleaned_data)
+        section.course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(module)
         session.commit()
@@ -343,6 +347,7 @@ class CourseService:
 
         cleaned_data = data.model_dump(exclude_unset=True)
         module.sqlmodel_update(cleaned_data)
+        module.section.course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(module)
         session.commit()
@@ -467,32 +472,24 @@ class CourseService:
         session: Session, data: DocumentContentCreate, current_user: Account
     ):
 
-        try:
-            await CourseService._run_module_checks(
-                session, data.module_id, current_user.id, ModuleType.DOCUMENT
-            )
+        await CourseService._run_module_checks(
+            session, data.module_id, current_user.id, ModuleType.DOCUMENT
+        )
 
-            print(data)
+        validator_resp = await CourseService._validate_document(
+            data.file_url, data.platform
+        )
 
-            validator_resp = await CourseService._validate_document(
-                data.file_url, data.platform
-            )
+        cleaned_data = data.model_dump(exclude_unset=True)
+        doc = DocumentContent(**cleaned_data)
+        doc.embed_url = validator_resp.embed_url
+        doc.file_size_bytes = validator_resp.file_size
 
-            print("====================", validator_resp)
+        session.add(doc)
+        session.commit()
+        session.refresh(doc)
 
-            cleaned_data = data.model_dump(exclude_unset=True)
-            doc = DocumentContent(**cleaned_data)
-            doc.embed_url = validator_resp.embed_url
-            doc.file_size_bytes = validator_resp.file_size
-
-            session.add(doc)
-            session.commit()
-            session.refresh(doc)
-
-            return doc
-        except Exception as e:
-            print("*******", e)
-            raise e
+        return doc
 
     @staticmethod
     async def update_document(

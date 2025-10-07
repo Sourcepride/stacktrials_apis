@@ -194,7 +194,7 @@ async def update_document(
     return await CourseService.update_document(session, document_id, data, current_user)
 
 
-@router.delete("document/{document_id}", status_code=204)
+@router.delete("/document/{document_id}", status_code=204)
 async def delete_document(
     document_id: str,
     session: SessionDep,

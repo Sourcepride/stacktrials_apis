@@ -4,7 +4,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.common.constants import ALLOWED_ORIGINS, IS_DEV, SECRET_KEY
 from app.common.utils import safe_json_loads
-from app.modules import media
+from app.modules import creator, media, student
 
 from .modules import account, auth, course, media
 
@@ -49,4 +49,10 @@ app.include_router(
 )
 app.include_router(
     course.router.router, prefix=f"{version_1}/courses", tags=["courses"]
+)
+app.include_router(
+    creator.router.router, prefix=f"{version_1}/creators", tags=["creators"]
+)
+app.include_router(
+    student.router.router, prefix=f"{version_1}/student", tags=["students"]
 )
