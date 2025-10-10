@@ -16,6 +16,7 @@ from app.schemas.courses import (
     CourseCreate,
     CourseEnrollmentCreate,
     CourseEnrollmentRead,
+    CourseProgressRead,
     CourseRatingCreate,
     CourseRatingRead,
     CourseRead,
@@ -265,6 +266,15 @@ async def get_enrollment(
     current_user: CurrentActiveUser,
 ):
     return await CourseService.get_enrollment(course_id, session, current_user)
+
+
+@router.get("/{course_id}/progress", response_model=CourseProgressRead)
+async def get_progress(
+    course_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    return await CourseService.get_progress(course_id, session, current_user)
 
 
 @router.get("/{course_id}/ratings", response_model=PaginatedRatings)

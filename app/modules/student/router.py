@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Body
 from typing_extensions import Annotated
 
-from app.core.dependencies import SessionDep
+from app.core.dependencies import CurrentActiveUser, SessionDep
 from app.models.user_model import Account
 from app.modules.student.service import StudentService
 from app.schemas.courses import (
@@ -17,13 +17,15 @@ router = APIRouter()
 
 
 @router.get("/enrolled", response_model=PaginatedEnrolledCourses)
-async def enrolled(current_user: Account, session: SessionDep, page: int | None = None):
+async def enrolled(
+    current_user: CurrentActiveUser, session: SessionDep, page: int | None = None
+):
     return await StudentService.enrolled(current_user, session, page or 1)
 
 
 @router.post("/increment-progress", response_model=CourseProgressRead)
 async def increment_progress(
-    current_user: Account,
+    current_user: CurrentActiveUser,
     session: SessionDep,
     data: Annotated[IncrementProgress, Body()],
 ):
@@ -34,7 +36,7 @@ async def increment_progress(
 
 @router.post("/toggle-module-completed", response_model=CourseEnrollmentRead)
 async def toggle_module_completed(
-    current_user: Account,
+    current_user: CurrentActiveUser,
     session: SessionDep,
     data: Annotated[ToggleModuleCompleted, Body()],
 ):
@@ -43,6 +45,6 @@ async def toggle_module_completed(
     )
 
 
-@router.get("/dasboard", response_model=LearnerStat)
-async def dashboard(current_user: Account, session: SessionDep):
+@router.get("/dashboard", response_model=LearnerStat)
+async def dashboard(current_user: CurrentActiveUser, session: SessionDep):
     return await StudentService.dashboard_stats(current_user, session)

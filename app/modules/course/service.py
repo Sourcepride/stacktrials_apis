@@ -395,7 +395,17 @@ class CourseService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="module not found"
             )
 
-        if module.section.course.account_id != current_user.id:
+        course_enrollment = session.exec(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == module.section.course_id,
+                CourseEnrollment.account_id == current_user.id,
+            )
+        ).first()
+
+        if (
+            module.section.course.account_id != current_user.id
+            and not course_enrollment
+        ):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
             )
@@ -589,6 +599,20 @@ class CourseService:
             raise HTTPException(404, "not enrolled")
 
         return enrollment
+
+    @staticmethod
+    async def get_progress(course_id: str, session: Session, curent_user: Account):
+        progress = session.exec(
+            select(CourseProgress).where(
+                CourseProgress.course_id == course_id,
+                CourseProgress.account_id == curent_user.id,
+            )
+        ).first()
+
+        if not progress:
+            raise HTTPException(404, "no progress found")
+
+        return progress
 
     @staticmethod
     async def create_enrollment(
