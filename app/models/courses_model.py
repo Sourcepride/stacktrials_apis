@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Index, UniqueConstraint
+from sqlalchemy import DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -92,7 +92,11 @@ class Course(AppBaseModelMixin, CourseBase, table=True):
 
     author: Optional["Account"] = Relationship(back_populates="courses")
     sections: list["Section"] = Relationship(
-        back_populates="course", passive_deletes="all"
+        back_populates="course",
+        passive_deletes="all",
+        sa_relationship_kwargs={
+            "order_by": "Section.order_index",
+        },
     )
     enrollments: list["CourseEnrollment"] = Relationship(
         back_populates="course", passive_deletes="all"
@@ -148,7 +152,11 @@ class Section(AppBaseModelMixin, SectionBase, table=True):
     # Relationships
     course: Course = Relationship(back_populates="sections")
     modules: list["Module"] = Relationship(
-        back_populates="section", passive_deletes="all"
+        back_populates="section",
+        passive_deletes="all",
+        sa_relationship_kwargs={
+            "order_by": "Module.order_index",
+        },
     )
 
     __table_args__ = (
@@ -349,7 +357,13 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
     enrollment_date: datetime = Field(
         default_factory=lambda: datetime.now(tz=timezone.utc)
     )
-    completion_date: Optional[datetime] = None
+    completion_date: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
     progress_percentage: float = Field(default=0.0, ge=0, le=100)
     last_accessed: datetime = Field(
         default_factory=lambda: datetime.now(tz=timezone.utc)
@@ -370,8 +384,20 @@ class CourseProgressBase(AppSQLModel):
     status: ModuleProgressStatus = Field(
         default=ModuleProgressStatus.NOT_STARTED, index=True
     )
-    start_time: Optional[datetime] = None
-    completion_time: Optional[datetime] = None
+    start_time: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
+    completion_time: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
     time_spent_seconds: int = Field(default=0, ge=0)
     progress_data: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
@@ -381,7 +407,13 @@ class CourseProgressBase(AppSQLModel):
 
     current_streak: int = Field(default=0)
     longest_streak: int = Field(default=0)
-    last_active_date: Optional[datetime] = None
+    last_active_date: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
 
 
 class CourseProgress(AppBaseModelMixin, CourseProgressBase, table=True):
@@ -413,7 +445,13 @@ class CourseProgress(AppBaseModelMixin, CourseProgressBase, table=True):
 class QuizAttemptBase(AppSQLModel):
     attempt_number: int = Field(ge=1)
     start_time: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    completion_time: Optional[datetime] = None
+    completion_time: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
     score: Optional[float] = Field(default=None, ge=0, le=100)
     answers: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSONB))
     status: QuizAttemptStatus = Field(default=QuizAttemptStatus.IN_PROGRESS)

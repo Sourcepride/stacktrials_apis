@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
-from sqlalchemy import Column, Index, UniqueConstraint
+from sqlalchemy import Column, DateTime, Index, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Field, Relationship
 
@@ -69,7 +69,13 @@ class ChatMemberBase(AppSQLModel):
     role: MemberRole = Field(default=MemberRole.MEMBER)
     status: MemberStatus = Field(default=MemberStatus.ACTIVE)
     joined_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
-    left_at: Optional[datetime] = None
+    left_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
     notifications_enabled: bool = Field(default=True)
     is_pinned: bool = Field(default=False)  # Pin chat for user
 
@@ -128,9 +134,21 @@ class MessageBase(AppSQLModel):
     file_type: Optional[str] = Field(max_length=50, default=None)  # MIME type
 
     is_edited: bool = Field(default=False)
-    edited_at: Optional[datetime] = None
+    edited_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
     is_deleted: bool = Field(default=False)
-    deleted_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
     extra_data: Optional[dict[str, Any]] = Field(
         default=None, sa_column=Column(JSONB)
     )  # Extra data
@@ -223,7 +241,13 @@ class ChatInviteBase(AppSQLModel):
     )  # Public invite link
     max_uses: Optional[int] = Field(default=None, ge=1)  # Limit uses for invite code
     current_uses: int = Field(default=0, ge=0)
-    expires_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
     is_active: bool = Field(default=True)
 
 

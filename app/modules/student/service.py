@@ -80,9 +80,9 @@ class StudentService:
 
         session.commit()
 
-        session.refresh(resp)
+        session.refresh(resp[0])
 
-        return resp
+        return resp[0]
 
     @staticmethod
     async def increment_progress(
@@ -109,19 +109,28 @@ class StudentService:
                 CourseEnrollment.account_id == current_user.id,
                 CourseEnrollment.course_id == module.section.course_id,
             )
-        ).one()
+        ).first()
+
+        if not enrollment:
+            raise HTTPException(404, "enrollment not found")
 
         last_section = session.exec(
             select(Section)
             .where(Section.course_id == module.section.course_id)
             .order_by(desc(Section.order_index))
-        ).one()
+        ).first()
+
+        if not last_section:
+            raise HTTPException(404, "last section not found")
 
         last_module = session.exec(
             select(Module)
             .where(Module.section_id == last_section.id)
             .order_by(desc(Module.order_index))
         ).first()
+
+        if not last_module:
+            raise HTTPException(404, "last module not found")
 
         now = datetime.now(tz=timezone.utc)
 
@@ -149,7 +158,10 @@ class StudentService:
                         Section.order_index > module.section.order_index,
                     )
                     .order_by(asc(Section.order_index))
-                ).one()
+                ).first()
+
+                if not next_section:
+                    raise ValueError("can not find next_module")
 
                 updates["next_module"] = sorted(
                     next_section.modules, key=lambda x: x.order_index
@@ -171,8 +183,10 @@ class StudentService:
                 updates["current_streak"], progress.longest_streak
             )
 
+        _, progress = await StudentService._toggle_module_status(
+            current_user, session, module_id
+        )
         progress.sqlmodel_update(updates)
-        await StudentService._toggle_module_status(current_user, session, module_id)
 
         session.add(progress)
         session.commit()
@@ -218,7 +232,10 @@ class StudentService:
                 CourseEnrollment.account_id == current_user.id,
                 CourseEnrollment.course_id == module.section.course_id,
             )
-        ).one()
+        ).first()
+
+        if not enrollment:
+            raise HTTPException(404, "no enrollment found")
 
         progress_data = progress.progress_data or {"finished_modules": []}
         finished = set(progress_data.get("finished_modules", []))
@@ -232,7 +249,9 @@ class StudentService:
             finished.discard(module_id)
 
         all_modules = session.exec(
-            select(Module).where(Module.section.course_id == module.section.course_id)
+            select(Module)
+            .join(Section)
+            .where(Section.course_id == module.section.course_id)
         ).all()
 
         total_modules = len(all_modules)
@@ -256,4 +275,4 @@ class StudentService:
 
         session.add(progress)
         session.add(enrollment)
-        return enrollment
+        return (enrollment, progress)
