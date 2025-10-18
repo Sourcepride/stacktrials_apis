@@ -1,7 +1,7 @@
 import secrets
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Form, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Form, Query, Request, Response
 
 from app.common.constants import DROPBOX_REDIRECT_URI, GITHUB_REDIRECT_URI
 from app.common.utils import encode_state
@@ -66,18 +66,24 @@ async def google_callback(
     session: SessionDep,
     user: CurrentActiveUserSilent,
     redis: RedisDep,
+    background_tasks: BackgroundTasks,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return await google_callback_handler(request, session, state, user, redis)
+    return await google_callback_handler(
+        request, session, state, user, redis, background_tasks
+    )
 
 
 @router.post("/google-one-tap", response_model=Token)
 async def google_one_tab(
     token: Annotated[GoogleTokenPayload, Form()],
     session: SessionDep,
+    background_tasks: BackgroundTasks,
 ):
 
-    return await google_one_tap(token.credential, session, token.redirect)
+    return await google_one_tap(
+        token.credential, session, background_tasks, token.redirect
+    )
 
 
 @router.get("/github/login")
@@ -102,9 +108,12 @@ async def github_callback(
     session: SessionDep,
     user: CurrentActiveUserSilent,
     redis: RedisDep,
+    background_tasks: BackgroundTasks,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return await github_callback_handler(request, session, state, user, redis)
+    return await github_callback_handler(
+        request, session, state, user, redis, background_tasks
+    )
 
 
 @router.get("/providers/dropbox/login", description="add dropbox storage")

@@ -1,0 +1,58 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        # We don't need to add any filters here, we'll do it in relabel_configs
+
+    relabel_configs:
+      # --- 1. Filter out noisy containers ---
+      # Drop logs from loki, promtail, and grafana itself
+      - source_labels: ["__meta_docker_container_name"]
+        regex: "/(loki|promtail|grafana)"
+        action: drop
+
+      # --- 2. Tell Promtail where to find the log files ---
+      # All other containers will be scraped
+      - source_labels: ["__meta_docker_container_id"]
+        target_label: "__path__"
+        replacement: "/var/lib/docker/containers/$1/$1-json.log"
+
+    # --- 3. Filter the log content itself ---
+    pipeline_stages:
+      # Your 'api' service uses 'driver: "json-file"'.
+      # This stage parses that JSON.
+      - json:
+          expressions:
+            log: log
+            stream: stream
+
+      # Makes the 'log' field the actual log line for processing
+      - output:
+          source: log
+
+      # --- 4. Drop DEBUG logs ---
+      # This assumes your Loguru format: "... | DEBUG | ..."
+      - regex:
+          # Extracts the log level into a temporary 'level' variable
+          expression: '.*\| (?P<level>\w+)\s+\|.*'
+      - labels:
+          level: # Makes 'level' a label (good for Grafana)
+      - drop:
+          source: "level" # Look at the 'level' we just extracted
+          value: "DEBUG" # If it's "DEBUG", drop the line
+
+      # --- 5. Drop Noisy Uvicorn Health Checks ---
+      # Add any other paths you want to ignore here
+      - drop:
+          expression: ".*(GET /health|GET /ready|GET /metrics).*"

@@ -1,0 +1,45 @@
+{
+    "version": 1,
+    "formatters": {
+        "json": {
+            "class": "pythonjsonlogger.jsonlogger.JsonFormatter",
+            "format": "%(asctime)s %(levelname)s %(name)s %(message)s"
+        },
+        "simple": {
+            "format": "%(asctime)s - %(levelname)s - %(name)s - %(message)s"
+        }
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "json",
+            "stream": "ext://sys.stdout",
+            "level": "INFO"
+        },
+        "mail": {
+            "class": "logging.handlers.SMTPHandler",
+            "mailhost": [
+                "${SMTP_HOST}",
+                "${SMTP_PORT}"
+            ],
+            "fromaddr": "${SMTP_USER}",
+            "toaddrs": [
+                "${ADMIN_EMAIL}"
+            ],
+            "subject": "stacktrails Error Log",
+            "credentials": [
+                "${SMTP_USER}",
+                "${SMTP_PASS}"
+            ],
+            "secure": [],
+            "formatter": "simple",
+            "level": "ERROR"
+        }
+    },
+    "root": {
+        "level": "INFO",
+        "handlers": [
+            "console"
+        ]
+    }
+}

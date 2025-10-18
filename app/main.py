@@ -1,14 +1,24 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from httpx import Request
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.common.constants import ALLOWED_ORIGINS, IS_DEV, SECRET_KEY
 from app.common.utils import safe_json_loads
+from app.core.exceptions import setup_logger
 from app.modules import creator, media, student
 
 from .modules import account, auth, course, media
 
 app = FastAPI()
+app_logger = setup_logger()
+
+
+static_path = Path(__file__).resolve().parent.joinpath("static")
+app.mount("/static", StaticFiles(directory=static_path), name="static")
 
 
 assert ALLOWED_ORIGINS is not None
@@ -16,6 +26,17 @@ assert SECRET_KEY is not None
 
 # middlewares
 origins = safe_json_loads(ALLOWED_ORIGINS, [])
+
+
+# @app.middleware("http")
+# async def log_exceptions(request: Request, call_next):
+#     try:
+#         return await call_next(request)
+#     except Exception as e:
+#         app_logger.error(f"Unhandled error: {e}", exc_info=True)
+#         return JSONResponse(
+#             {"detail": "Internal server error"}, status_code=500
+#         )
 
 
 app.add_middleware(

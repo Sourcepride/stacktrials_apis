@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
-from fastapi import HTTPException, Request, Response
+from fastapi import BackgroundTasks, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 
 from app.common.constants import (
     ACCESS_TOKEN_MINUTES,
+    BASE_URL,
     DROPBOX_CLIENT_ID,
     DROPBOX_CLIENT_SECRET,
     FRONTEND_URL,
@@ -24,6 +25,7 @@ from app.common.constants import (
     GOOGLE_REDIRECT_URI,
     IS_DEV,
 )
+from app.common.email_utils import send_email
 from app.common.enum import Providers
 from app.common.mixins import MessagePatterns
 from app.common.utils import (
@@ -39,16 +41,22 @@ from app.models.user_model import Account, Profile
 from app.schemas.account import AccessToken, RefreshToken
 
 
-async def google_one_tap(id_token: str, session: Session, redirect: str | None = None):
+async def google_one_tap(
+    id_token: str,
+    session: Session,
+    background_tasks: BackgroundTasks,
+    redirect: str | None = None,
+):
     userinfo = verify_google_auth_token(id_token)
     email = userinfo["email"]
     sub = userinfo["sub"]
 
-    return authorize_or_register(
+    return await authorize_or_register(
         session,
         email,
         Providers.GOOGLE,
         sub,
+        background_tasks,
         "openid email profile",
         {"redirect": redirect or "/en"},
     )
@@ -60,6 +68,7 @@ async def google_callback_handler(
     state: str | None,
     current_user: Optional[Account],
     redis: Redis,
+    background_tasks: BackgroundTasks,
 ):
 
     state_data = {}
@@ -88,11 +97,12 @@ async def google_callback_handler(
     refresh_token = token.get("refresh_token")
     scopes = token.get("scopes")
 
-    return authorize_or_register(
+    return await authorize_or_register(
         session,
         email,
         Providers.GOOGLE,
         sub,
+        background_tasks,
         scopes,
         state_data,
         access_token,
@@ -106,6 +116,7 @@ async def github_callback_handler(
     state: str | None,
     current_user: Optional[Account],
     redis: Redis,
+    background_tasks: BackgroundTasks,
 ):
 
     assert oauth.github is not None
@@ -139,11 +150,12 @@ async def github_callback_handler(
             )
             email = primary["email"]
 
-    return authorize_or_register(
+    return await authorize_or_register(
         session,
         email,
         Providers.GITHUB,
         provider_id,
+        background_tasks,
         "read:user user:email",
         state_data,
     )
@@ -448,11 +460,12 @@ async def replace_provider(
 # -------- HELPER FUNCTIONS ---------
 
 
-def authorize_or_register(
+async def authorize_or_register(
     session: Session,
     email: str,
     provider: Providers,
     provider_id: str,
+    background_tasks: BackgroundTasks,
     scopes: Optional[str] = None,
     state: dict = {},
     access_token: Optional[str] = None,
@@ -477,6 +490,21 @@ def authorize_or_register(
             )
 
     session.commit()
+
+    if not existing:
+        await send_email(
+            background_tasks,
+            [user.email],
+            "Welcome to stacktrails",
+            "welcome.html",
+            {
+                "logo_url": BASE_URL + "/static/black-logo.svg",
+                "name": "Dear",
+                "img_url": BASE_URL + "/static/road-bro.svg",
+                "dashboard_url": FRONTEND_URL + "/dashboard",
+            },
+        )
+
     access, refresh = (
         create_jwt_token(str(user.id), email),
         create_jwt_token(str(user.id), email, "refresh"),
