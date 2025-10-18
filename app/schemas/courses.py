@@ -18,6 +18,7 @@ from app.models.courses_model import (
     QuizContentBase,
     QuizQuestionBase,
     SectionBase,
+    TagBase,
     VideoContentBase,
 )
 from app.models.user_model import Account, AccountBase, Profile
@@ -40,6 +41,7 @@ class CourseRead(CourseBase):
     enrollment_count: int
     comment_count: int
     updated_at: datetime
+    tags: list["TagRead"]
 
 
 class PaginatedCourse(PaginatedSchema):
@@ -56,6 +58,7 @@ class CourseUpdate(CourseBase):
     title: Optional[str] = None
     language: Optional[str] = None
     certification_enabled: Optional[bool] = None
+    tags: Optional[list[str]] = []
 
 
 class SectionRead(SectionBase):
@@ -278,3 +281,7 @@ class EnrolledCoursesResp(BaseModel):
 
 class PaginatedEnrolledCourses(PaginatedSchema):
     items: list[EnrolledCoursesResp]
+
+
+class TagRead(TagBase):
+    pass

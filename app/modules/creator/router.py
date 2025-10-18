@@ -24,6 +24,16 @@ async def created(
     return await CreatorService.created_videos(title, currentUser, session, page or 1)
 
 
+@router.get("/pages/{u}", response_model=PaginatedCourse)
+async def page_courses(
+    u: str,
+    session: SessionDep,
+    page: int | None = None,
+    title: Annotated[str | None, Query()] = None,
+):
+    return await CreatorService.page_videos(title, u, session, page or 1)
+
+
 # @router.get("/earnings")
 # async def earnings():
 #     pass

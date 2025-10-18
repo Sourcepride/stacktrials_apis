@@ -5,7 +5,7 @@ from typing import Any, Optional, cast
 from fastapi import HTTPException, status
 from pydantic import HttpUrl
 from sqlalchemy import BinaryExpression, text
-from sqlmodel import Session, asc, col, desc, func, select, update
+from sqlmodel import Session, asc, col, desc, func, or_, select, update
 
 from app.common.constants import PER_PAGE
 from app.common.enum import (
@@ -61,6 +61,69 @@ from app.schemas.media import DocumentItem
 
 
 class CourseService:
+
+    @staticmethod
+    async def explore_courses(
+        session: Session,
+        q: str | None = None,
+        tags: list[str] | None = None,
+        level: DifficultyLevel | None = None,
+        language: str | None = None,
+        sort: SortCoursesBy | None = None,
+        page: int = 1,
+        per_page: int = PER_PAGE,
+    ):
+        """
+        Combined explore filter: search, tags, difficulty, language, sorting.
+        """
+        base_query = (
+            select(Course)
+            .where(
+                Course.status == CourseStatus.PUBLISHED,
+                Course.visibility == VisibilityType.PUBLIC,
+            )
+            .group_by(Course.id)
+        )
+
+        # 🔍 Keyword search
+        if q:
+            pattern = f"%{q.lower()}%"
+            base_query = base_query.where(
+                or_(
+                    func.lower(Course.title).like(pattern),
+                    func.lower(Course.description).like(pattern),
+                )
+            )
+
+        # 🎯 Filter by tags
+        if tags:
+            tag_names = [t.strip().lower() for t in tags if t.strip()]
+            if tag_names:
+                base_query = (
+                    base_query.join(CourseTag)
+                    .join(Tag)
+                    .where(col(Tag.name).in_(tag_names))
+                    .group_by(Course.id)
+                )
+
+        # 📘 Filter by difficulty
+        if level:
+            base_query = base_query.where(Course.difficulty_level == level)
+
+        # 🌍 Filter by language
+        if language:
+            base_query = base_query.where(Course.language == language)
+
+        # 🔢 Sorting logic
+        if sort == SortCoursesBy.MOST_ENROLLED:
+            base_query = base_query.order_by(desc(Course.enrollment_count))
+        elif sort == SortCoursesBy.TOP_RATED:
+            base_query = base_query.order_by(desc(Course.average_rating))
+        else:
+            base_query = base_query.order_by(desc(Course.created_at))
+
+        # 📄 Paginate
+        return paginate(session, base_query, page, per_page)
 
     @staticmethod
     async def list_courses(
@@ -150,11 +213,16 @@ class CourseService:
             cleaned_data.get("title", ""), session
         )
 
+        tags = cleaned_data.pop("tags", [])
         course = Course(**cleaned_data, account_id=current_user.id, slug=slug)
 
         session.add(course)
         session.commit()
         session.refresh(course)
+
+        if tags:
+            CourseService._sync_course_tags(session, course, tags)
+
         return course
 
     @staticmethod
@@ -170,12 +238,16 @@ class CourseService:
         if title and course.title != title:
             slug = CourseService._generate_course_slug(title, session)
 
+        tags = cleaned_data.pop("tags", None)
         course.sqlmodel_update({**cleaned_data, "slug": slug})
         course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(course)
         session.commit()
         session.refresh(course)
+
+        if tags is not None:
+            CourseService._sync_course_tags(session, course, tags)
         return course
 
     @staticmethod
@@ -1122,3 +1194,39 @@ class CourseService:
             )
 
         return validator_resp
+
+    @staticmethod
+    def _sync_course_tags(session: Session, course: Course, tag_names: list[str]):
+        """Create, reuse, or remove tags associated with a course."""
+        # Normalize tag names
+        new_tags = {t.strip().lower() for t in tag_names if t.strip()}
+        current_tags = {t.name for t in course.tags}
+
+        tags_to_add = new_tags - current_tags
+        tags_to_remove = current_tags - new_tags
+
+        # Remove old tags
+        if tags_to_remove:
+            for tag in list(course.tags):
+                if tag.name in tags_to_remove:
+                    tag.usage_count -= 1
+                    if tag.usage_count <= 0:
+                        session.delete(tag)
+                    else:
+                        session.add(tag)
+                    course.tags.remove(tag)
+
+        # Add or reuse tags
+        for name in tags_to_add:
+            existing_tag = session.exec(select(Tag).where(Tag.name == name)).first()
+            if existing_tag:
+                existing_tag.usage_count += 1
+                course.tags.append(existing_tag)
+            else:
+                new_tag = Tag(name=name, usage_count=1)
+                session.add(new_tag)
+                course.tags.append(new_tag)
+
+        session.add(course)
+        session.commit()
+        session.refresh(course)

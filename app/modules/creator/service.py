@@ -1,5 +1,6 @@
 from typing import Optional
 
+from fastapi import HTTPException
 from sqlmodel import Session, col, func, select
 
 from app.common.constants import PER_PAGE
@@ -71,6 +72,25 @@ class CreatorService:
         per_page: int = PER_PAGE,
     ):
         query = select(Course).where(Course.account_id == current_user.id)
+        if title:
+            query = query.where(col(Course.title).ilike(f"%{title}%"))
+
+        return paginate(session, query, page, per_page)
+
+    @staticmethod
+    async def page_videos(
+        title: Optional[str],
+        username: str,
+        session: Session,
+        page: int = 1,
+        per_page: int = PER_PAGE,
+    ):
+
+        user = session.exec(select(Account).where(Account.username == username)).first()
+        if not user:
+            raise HTTPException(404, "user not found")
+
+        query = select(Course).where(Course.account_id == user.id)
         if title:
             query = query.where(col(Course.title).ilike(f"%{title}%"))
 

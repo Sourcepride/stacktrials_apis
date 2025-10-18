@@ -81,6 +81,13 @@ class ProfileBase(AppSQLModel):
     display_name: Optional[str] = None
     bio: Optional[str] = None
     avatar: Optional[str] = None
+    x: Optional[str] = None
+    youtube: Optional[str] = None
+    facebook: Optional[str] = None
+    tiktok: Optional[str] = None
+    website: Optional[str] = None
+    instagram: Optional[str] = None
+    language: Optional[str] = None
 
 
 class Profile(AppBaseModelMixin, ProfileBase, table=True):

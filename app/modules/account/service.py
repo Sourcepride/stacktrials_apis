@@ -45,6 +45,7 @@ async def update_current_profile(
         raise HTTPException(status.HTTP_403_FORBIDDEN, "permission denied")
 
     cleaned_data = data.model_dump(exclude_unset=True)
+
     profile.sqlmodel_update(cleaned_data)
     session.add(profile)
     session.commit()

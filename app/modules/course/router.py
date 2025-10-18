@@ -2,10 +2,12 @@ from calendar import c
 
 from fastapi import APIRouter, Body, Query
 from fastapi.background import P
+from sqlmodel import desc, select
 from typing_extensions import Annotated
 
 from app.common.enum import DifficultyLevel, SortCoursesBy
 from app.core.dependencies import CurrentActiveUser, CurrentActiveUserSilent, SessionDep
+from app.models.courses_model import Tag
 from app.modules.course.service import CourseService
 from app.schemas.courses import (
     CourseCommentCreate,
@@ -36,6 +38,7 @@ from app.schemas.courses import (
     SectionCreate,
     SectionRead,
     SectionUpdate,
+    TagRead,
     VideoContentCreate,
     VideoContentRead,
     VideoContentUpdate,
@@ -57,6 +60,44 @@ async def list_courses(
 ):
     return await CourseService.list_courses(
         q, sort, level, session, language, page or 1
+    )
+
+
+@router.get("/tags", response_model=list[TagRead])
+async def list_tags(session: SessionDep):
+    tags = session.exec(select(Tag).order_by(desc(Tag.usage_count))).all()
+    return tags
+
+
+@router.get("/explore", response_model=PaginatedCourse)
+async def explore_courses(
+    session: SessionDep,
+    q: Annotated[
+        str | None, Query(description="Search by course title or description")
+    ] = None,
+    tags: Annotated[
+        list[str] | None, Query(description="Filter by one or more tags")
+    ] = None,
+    level: Annotated[
+        DifficultyLevel | None, Query(description="Filter by difficulty level")
+    ] = None,
+    language: Annotated[str | None, Query(description="Filter by language")] = None,
+    sort: Annotated[
+        SortCoursesBy | None, Query(description="Sort (most_enrolled, top_rated, etc.)")
+    ] = None,
+    page: int | None = Query(1, ge=1),
+):
+    """
+    Explore endpoint to discover courses based on tags, search, level, language, and sorting.
+    """
+    return await CourseService.explore_courses(
+        session=session,
+        q=q,
+        tags=tags or [],
+        level=level,
+        language=language,
+        sort=sort,
+        page=page or 1,
     )
 
 
