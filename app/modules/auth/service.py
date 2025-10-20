@@ -488,6 +488,8 @@ async def authorize_or_register(
                 FRONTEND_URL + f"?message={MessagePatterns.MESSAGE_ACCOUNT_EXISTS}",
                 status_code=303,
             )
+        session.flush()
+        create_provider(session, user.id, provider, provider_id, scopes or "")
 
     session.commit()
 
@@ -566,6 +568,23 @@ def create_account(
         )
         session.add(account)
         return account
+
+
+def create_provider(
+    session: Session,
+    account_id: uuid.UUID,
+    provider: Providers,
+    provider_id: str,
+    scopes: str,
+):
+    obj = Provider(
+        provider_id=provider_id,
+        provider=provider,
+        account_id=account_id,
+        scopes=" ".join(scopes.split()),
+    )
+
+    session.add(obj)
 
 
 async def manual_oauth_callback(

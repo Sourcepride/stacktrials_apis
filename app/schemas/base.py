@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from xmlrpc.client import boolean
 
 from pydantic import BaseModel
 
@@ -26,3 +27,13 @@ class PaginatedSchema(BaseModel):
     total_pages: int
     has_next: bool
     has_prev: bool
+
+
+class ContactForm(BaseModel):
+    title: str
+    message: str
+
+
+class ContactFormResponse(BaseModel):
+    success: boolean
+    message: str
