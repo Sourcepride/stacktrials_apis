@@ -9,7 +9,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from app.common.constants import ALLOWED_ORIGINS, IS_DEV, SECRET_KEY
 from app.common.utils import safe_json_loads
 from app.core.exceptions import setup_logger
-from app.modules import creator, media, student
+from app.modules import creator, management, media, student
 
 from .modules import account, auth, course, media
 
@@ -76,5 +76,8 @@ app.include_router(
 )
 app.include_router(
     student.router.router, prefix=f"{version_1}/student", tags=["students"]
+)
+app.include_router(
+    management.router.router, prefix=f"{version_1}/management", tags=["management"]
 )
 app.include_router(student.ws_router.router)
