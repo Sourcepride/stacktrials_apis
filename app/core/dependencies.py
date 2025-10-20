@@ -3,7 +3,15 @@
 
 from typing import Annotated, AsyncGenerator, Optional
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import (
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    WebSocket,
+    WebSocketException,
+    status,
+)
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlmodel import Session
@@ -109,7 +117,33 @@ def get_current_active_user(
     return current_user
 
 
+async def get_current_user_ws(
+    websocket: WebSocket,
+    session: SessionDep,
+    token: Annotated[str | None, Query()] = None,
+):
+    print("=============================")
+    exception = WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
+    token = websocket.cookies.get("access_token") or token
+    if not token:
+        raise exception
+
+    values = decode_token(token)
+    user_id = values.get("user_id")
+
+    if not user_id:
+        raise exception
+
+    user = session.get(Account, user_id)
+
+    if not user:
+        raise exception
+
+    return user
+
+
 CurrentActiveUser = Annotated["Account", Depends(get_current_active_user)]
 CurrentActiveUserSilent = Annotated[
     Optional["Account"], Depends(get_current_user_silent)
 ]
+CurrentWSUser = Annotated[Account, Depends(get_current_user_ws)]

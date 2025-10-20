@@ -11,7 +11,7 @@ from app.core.dependencies import (
     RedisDep,
     SessionDep,
 )
-from app.core.security import oauth, sign_state
+from app.core.security import create_jwt_token, oauth, sign_state
 from app.schemas.account import (
     AccessToken,
     GoogleTokenPayload,
@@ -222,3 +222,9 @@ async def dropbox_access_token(
     current_user: CurrentActiveUser,
 ):
     return await get_dropbox_access_token_from_refresh(current_user, session)
+
+
+@router.get("/ws-shortlived", response_model=ShortLived)
+async def ws_shortlived_token(session: SessionDep, current_user: CurrentActiveUser):
+    token = create_jwt_token(str(current_user.id), current_user.email, "access", 1)
+    return {"access_token": token, "expires_in": 1}

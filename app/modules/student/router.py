@@ -4,6 +4,7 @@ from typing_extensions import Annotated
 from app.core.dependencies import CurrentActiveUser, SessionDep
 from app.models.user_model import Account
 from app.modules.student.service import StudentService
+from app.schemas.annotations import DocumentAnnotationRead
 from app.schemas.courses import (
     CourseEnrollmentRead,
     CourseProgressRead,
@@ -48,3 +49,12 @@ async def toggle_module_completed(
 @router.get("/dashboard", response_model=LearnerStat)
 async def dashboard(current_user: CurrentActiveUser, session: SessionDep):
     return await StudentService.dashboard_stats(current_user, session)
+
+
+@router.get(
+    "/document/{doc_id}/annotations", response_model=list[DocumentAnnotationRead]
+)
+async def get_annotations(
+    doc_id: str, current_user: CurrentActiveUser, session: SessionDep
+):
+    return await StudentService.get_annotations(doc_id, current_user, session)

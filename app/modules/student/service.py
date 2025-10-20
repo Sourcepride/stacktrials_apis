@@ -7,6 +7,7 @@ from sqlmodel import Session, asc, col, desc, func, select
 from app.common.constants import PER_PAGE
 from app.common.enum import EnrollmentStatus
 from app.common.utils import paginate
+from app.models.annotation_model import DocumentAnnotation
 from app.models.courses_model import (
     Course,
     CourseEnrollment,
@@ -69,6 +70,15 @@ class StudentService:
     @staticmethod
     async def save_video_progress():
         pass
+
+    @staticmethod
+    async def get_annotations(doc_id: str, current_user: Account, session: Session):
+        return session.exec(
+            select(DocumentAnnotation).where(
+                DocumentAnnotation.account_id == current_user.id,
+                DocumentAnnotation.document_id == doc_id,
+            )
+        ).all()
 
     @staticmethod
     async def toggle_module_completion_status(

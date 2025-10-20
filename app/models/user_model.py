@@ -8,6 +8,7 @@ from sqlmodel import Field, Relationship, SQLModel
 from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
+    from .annotation_model import DocumentAnnotation, DocumentChat
     from .chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
     from .comments_model import Comment, CommentLike, Rating
     from .courses_model import Course, CourseEnrollment, CourseProgress, QuizAttempt
@@ -74,6 +75,14 @@ class Account(AppBaseModelMixin, AccountBase, table=True):
     comment_likes: list["CommentLike"] = Relationship(
         back_populates="account",
         sa_relationship_kwargs={"cascade": "all, delete-orphan"},
+    )
+
+    document_annotations: list["DocumentAnnotation"] = Relationship(
+        back_populates="account", passive_deletes="all"
+    )
+
+    document_chats: list["DocumentChat"] = Relationship(
+        back_populates="account", passive_deletes="all"
     )
 
 

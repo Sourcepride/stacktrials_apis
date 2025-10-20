@@ -512,13 +512,8 @@ async def authorize_or_register(
 
     if state.get("redirect"):
         secure = not IS_DEV
-        samesite = "lax"
-        cookie_domain = "localhost" if IS_DEV else None
-
-        print(
-            state.get("redirect"),
-            extract_redirect_uri(state.get("redirect", ""), FRONTEND_URL),
-        )
+        samesite = "none" if not IS_DEV else "lax"
+        cookie_domain = "localhost" if IS_DEV else ".stacktrails.com"
 
         redirect_response = RedirectResponse(
             url=extract_redirect_uri(state.get("redirect", ""), FRONTEND_URL),
@@ -541,7 +536,7 @@ async def authorize_or_register(
             httponly=True,
             secure=secure,
             samesite=samesite,
-            max_age=3600 * 7,
+            max_age=3600 * 24 * 30,
         )
 
         return redirect_response

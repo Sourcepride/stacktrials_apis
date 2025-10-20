@@ -26,6 +26,7 @@ from app.common.enum import (
 from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
+    from .annotation_model import DocumentAnnotation, DocumentChat
     from .chat_model import Chat
     from .comments_model import Comment, Rating
     from .user_model import Account
@@ -283,6 +284,13 @@ class DocumentContent(AppBaseModelMixin, DocumentBase, table=True):
 
     # Relationships
     module: Module = Relationship(back_populates="document_content")
+    annotations: list["DocumentAnnotation"] = Relationship(
+        back_populates="document", passive_deletes="all"
+    )
+
+    chats: list["DocumentChat"] = Relationship(
+        back_populates="document", passive_deletes="all"
+    )
 
 
 class QuizContentBase(AppSQLModel):

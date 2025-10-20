@@ -77,3 +77,4 @@ app.include_router(
 app.include_router(
     student.router.router, prefix=f"{version_1}/student", tags=["students"]
 )
+app.include_router(student.ws_router.router)

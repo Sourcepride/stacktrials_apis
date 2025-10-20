@@ -1,1 +1,1 @@
-from . import router
+from . import router, ws_router

@@ -5,16 +5,17 @@ from pathlib import Path
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks
 from fastapi_mail import ConnectionConfig, FastMail, MessageSchema, MessageType
+from pydantic import BaseModel, EmailStr, SecretStr
 
 load_dotenv()
 
-cnf = lambda: Path(__file__).parent.parent / "templates"
+# cnf = lambda: Path(__file__).parent.parent / "templates"
 
-# === CONFIGURATION ===
+# # === CONFIGURATION ===
 conf = ConnectionConfig(
-    MAIL_USERNAME=os.getenv("MAIL_USERNAME", "support@stackdrills.com"),
-    MAIL_PASSWORD=os.getenv("MAIL_PASSWORD", "your_app_password_here"),
-    MAIL_FROM=os.getenv("MAIL_FROM", "support@stackdrills.com"),
+    MAIL_USERNAME=os.getenv("SMTP_USER", "support@stackdrills.com"),
+    MAIL_PASSWORD=SecretStr(os.getenv("SMTP_PASS", "your_app_password_here")),
+    MAIL_FROM=os.getenv("SMTP_USER", "support@stackdrills.com"),
     MAIL_PORT=587,
     MAIL_SERVER=os.getenv("SMTP_HOST", "smtp.zoho.com"),
     MAIL_STARTTLS=True,

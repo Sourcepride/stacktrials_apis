@@ -67,7 +67,9 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-def create_jwt_token(user_id: str, email: str, kind: str = "access"):
+def create_jwt_token(
+    user_id: str, email: str, kind: str = "access", exp: int | None = None
+):
     if JWT_SECRET is None:
         raise ValueError("JWT SECRET NOT SET")
 
@@ -79,14 +81,15 @@ def create_jwt_token(user_id: str, email: str, kind: str = "access"):
             {
                 "type": "access",
                 "email": email,
-                "exp": iat + timedelta(minutes=ACCESS_TOKEN_MINUTES),
+                "exp": iat
+                + timedelta(minutes=ACCESS_TOKEN_MINUTES if not exp else exp),
             }
         )
     else:
         payload.update(
             {
                 "type": "refresh",
-                "exp": iat + timedelta(days=REFRESH_TOKEN_DAYS),
+                "exp": iat + timedelta(days=REFRESH_TOKEN_DAYS if not exp else exp),
             }
         )
 
