@@ -1,6 +1,12 @@
 version: "3.9"
+
 services:
   api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: api
+    restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp
@@ -9,9 +15,67 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
-    volumes: [] # disable bind mounts in prod
+    env_file: .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=info
     command: >
       sh -c "
-      ./wait-for-db.sh main_db:5432 --
+      ./wait-for-db.sh host.docker.internal:5432 --
       gunicorn main:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8082
       "
+    ports:
+      - "8082:8082"  # expose only if needed (e.g., via Nginx)
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - loki_data:/loki
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: promtail
+    restart: unless-stopped
+    depends_on:
+      - loki
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./promtail-config.yml:/etc/promtail/config.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3032:3000"
+    env_file: .env
+    depends_on:
+      - loki
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+volumes:
+  loki_data:
+  grafana_data:
