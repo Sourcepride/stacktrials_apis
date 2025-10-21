@@ -36,24 +36,33 @@ scrape_configs:
         replacement: "/var/lib/docker/containers/$1/$1-json.log"
 
     pipeline_stages:
+      # Parse the docker JSON log format
       - json:
           expressions:
             log: log
             stream: stream
+      
+      # Set the final log line to be the 'log' field
       - output:
           source: log
 
       # Extract log level from Loguru or Uvicorn format
+      # Run this on the extracted 'log' field
       - regex:
+          source: log  # <-- FIXED
           expression: '.*\| (?P<level>\w+)\s+\|.*'
+      
+      # Create a 'level' label from the variable extracted by regex
       - labels:
           level:
 
-      # Drop DEBUG logs
+      # Drop DEBUG logs based on the 'level' label
       - drop:
           source: "level"
           value: "DEBUG"
 
       # Drop Uvicorn health checks
+      # Run this on the extracted 'log' field
       - drop:
+          source: log  # <-- FIXED
           expression: ".*(GET /health|GET /ready|GET /metrics).*"
