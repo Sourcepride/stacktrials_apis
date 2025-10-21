@@ -31,7 +31,9 @@ schema_config:
 compactor:
   working_directory: /tmp/loki/compactor
   retention_enabled: true
+  delete_request_store: boltdb-shipper  # <-- FIX 1: Added this line
 
 limits_config:
   retention_period: 1440h # 60 days * 24 hours = 1440 hours
+  allow_structured_metadata: false   # <-- FIX 2: Added this line
 # --- End of retention section ---
