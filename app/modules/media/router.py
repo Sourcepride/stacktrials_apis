@@ -35,6 +35,7 @@ from app.modules.media.service import (
     DocumentUrlConverter,
     DropBoxStorageService,
     GoogleDriveStorageService,
+    URLValidator,
     generate_unique_filename,
     list_active_providers,
     list_active_storage_providers,
@@ -224,78 +225,7 @@ async def upload_single_image(file: UploadFile = File(...)):
 
 @media_routes.post("/documents/validate", response_model=DocumentValidationResponse)
 async def validate_document_url(document: DocumentItem):
-    """
-    Validate that a document URL is accessible and get metadata
-    """
-    try:
-        converter = DocumentUrlConverter()
-
-        # Get different URL formats
-        urls = converter.convert_urls(
-            str(document.url), document.provider, document.media_type
-        )
-
-        # Test accessibility with HEAD request first
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            try:
-                response = await client.head(urls["direct_url"])
-            except:
-                # If HEAD fails, try GET with range
-                try:
-                    headers = {"Range": "bytes=0-1024"}
-                    response = await client.get(urls["direct_url"], headers=headers)
-                except:
-                    # Last resort - just check if preview URL is accessible
-                    response = await client.head(urls["preview_url"])
-
-        if response.status_code not in [
-            200,
-            206,
-            416,
-            403,
-        ]:  # 403 might be OK for some providers
-            return DocumentValidationResponse(
-                is_valid=False,
-                provider=document.provider,
-                media_type=document.media_type,
-                error_message=f"Document not accessible (HTTP {response.status_code})",
-            )
-
-        # Extract metadata
-        content_type = response.headers.get("content-type", "unknown")
-        content_length = response.headers.get("content-length")
-        file_size = int(content_length) if content_length else None
-
-        # Detect actual media type from response
-        detected_type = converter.detect_media_type(str(document.url), content_type)
-
-        # Extract filename from URL or headers
-        filename = None
-        content_disposition = response.headers.get("content-disposition")
-        if content_disposition and "filename=" in content_disposition:
-            filename = content_disposition.split("filename=")[-1].strip('"')
-        else:
-            filename = urlparse(str(document.url)).path.split("/")[-1]
-
-        return DocumentValidationResponse(
-            is_valid=True,
-            provider=document.provider,
-            media_type=detected_type,
-            direct_url=urls["direct_url"],
-            preview_url=urls["preview_url"],
-            embed_url=urls["embed_url"],
-            file_size=file_size,
-            content_type=content_type,
-            file_name=filename,
-        )
-
-    except Exception as e:
-        return DocumentValidationResponse(
-            is_valid=False,
-            provider=document.provider,
-            media_type=document.media_type,
-            error_message=f"Validation failed: {str(e)}",
-        )
+    return await URLValidator.validate_url_resource(document)
 
 
 @media_routes.get("/google/files", response_model=RetrivedFiles)

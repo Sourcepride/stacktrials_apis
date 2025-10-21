@@ -18,6 +18,7 @@ from app.models.courses_model import (
     QuizContentBase,
     QuizQuestionBase,
     SectionBase,
+    TagBase,
     VideoContentBase,
 )
 from app.models.user_model import Account, AccountBase, Profile
@@ -40,6 +41,7 @@ class CourseRead(CourseBase):
     enrollment_count: int
     comment_count: int
     updated_at: datetime
+    tags: list["TagRead"]
 
 
 class PaginatedCourse(PaginatedSchema):
@@ -49,9 +51,14 @@ class PaginatedCourse(PaginatedSchema):
 class CourseCreate(CourseBase):
     tags: list[str] = []
 
+    # TODO:  validate image...  images must come from trusted sources
+
 
 class CourseUpdate(CourseBase):
-    pass
+    title: Optional[str] = None
+    language: Optional[str] = None
+    certification_enabled: Optional[bool] = None
+    tags: Optional[list[str]] = []
 
 
 class SectionRead(SectionBase):
@@ -168,6 +175,8 @@ class CourseEnrollmentRead(CourseEnrollmentBase):
     id: uuid.UUID
     account_id: uuid.UUID
     course_id: str
+    completion_date: Optional[datetime]
+    progress_percentage: float
 
 
 class CourseEnrollmentCreate(CourseEnrollmentBase):
@@ -235,7 +244,44 @@ class CourseContentReadMin(CourseRead):
 
 class SectionContentReadFull(SectionRead):
     modules: list[ModuleRead]
+    course: CourseRead
 
 
 class CourseContentReadFull(CourseContentReadMin):
     sections: list[SectionContentReadFull]
+
+
+class CreatorStat(BaseModel):
+    total_enrolled: int
+    total_reviews: int
+    total_comments: int
+    # average_rating :float
+    total_published: int
+
+
+class LearnerStat(BaseModel):
+    completed_courses: int
+    created_courses: int
+    in_progress: int
+
+
+class IncrementProgress(BaseModel):
+    module_id: str
+
+
+class ToggleModuleCompleted(BaseModel):
+    module_id: str
+    status: bool
+
+
+class EnrolledCoursesResp(BaseModel):
+    course: CourseRead
+    enrollment: CourseEnrollmentRead
+
+
+class PaginatedEnrolledCourses(PaginatedSchema):
+    items: list[EnrolledCoursesResp]
+
+
+class TagRead(TagBase):
+    pass

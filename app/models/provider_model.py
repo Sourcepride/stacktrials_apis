@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from cryptography.fernet import Fernet
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Column, DateTime, UniqueConstraint
 from sqlmodel import Field, Relationship, SQLModel
 
 from app.common.constants import SECRET_KEY
@@ -34,7 +34,13 @@ class ProviderBase(AppSQLModel):
     provider: Providers
     provider_id: str
     scopes: Optional[str] = None
-    expires_at: Optional[datetime] = None
+    expires_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
 
 
 class Provider(AppBaseModelMixin, ProviderBase, table=True):

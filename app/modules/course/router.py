@@ -2,10 +2,12 @@ from calendar import c
 
 from fastapi import APIRouter, Body, Query
 from fastapi.background import P
+from sqlmodel import desc, select
 from typing_extensions import Annotated
 
 from app.common.enum import DifficultyLevel, SortCoursesBy
 from app.core.dependencies import CurrentActiveUser, CurrentActiveUserSilent, SessionDep
+from app.models.courses_model import Tag
 from app.modules.course.service import CourseService
 from app.schemas.courses import (
     CourseCommentCreate,
@@ -16,6 +18,7 @@ from app.schemas.courses import (
     CourseCreate,
     CourseEnrollmentCreate,
     CourseEnrollmentRead,
+    CourseProgressRead,
     CourseRatingCreate,
     CourseRatingRead,
     CourseRead,
@@ -31,9 +34,11 @@ from app.schemas.courses import (
     PaginatedComments,
     PaginatedCourse,
     PaginatedRatings,
+    SectionContentReadFull,
     SectionCreate,
     SectionRead,
     SectionUpdate,
+    TagRead,
     VideoContentCreate,
     VideoContentRead,
     VideoContentUpdate,
@@ -58,6 +63,44 @@ async def list_courses(
     )
 
 
+@router.get("/tags", response_model=list[TagRead])
+async def list_tags(session: SessionDep):
+    tags = session.exec(select(Tag).order_by(desc(Tag.usage_count))).all()
+    return tags
+
+
+@router.get("/explore", response_model=PaginatedCourse)
+async def explore_courses(
+    session: SessionDep,
+    q: Annotated[
+        str | None, Query(description="Search by course title or description")
+    ] = None,
+    tags: Annotated[
+        list[str] | None, Query(description="Filter by one or more tags")
+    ] = None,
+    level: Annotated[
+        DifficultyLevel | None, Query(description="Filter by difficulty level")
+    ] = None,
+    language: Annotated[str | None, Query(description="Filter by language")] = None,
+    sort: Annotated[
+        SortCoursesBy | None, Query(description="Sort (most_enrolled, top_rated, etc.)")
+    ] = None,
+    page: int | None = Query(1, ge=1),
+):
+    """
+    Explore endpoint to discover courses based on tags, search, level, language, and sorting.
+    """
+    return await CourseService.explore_courses(
+        session=session,
+        q=q,
+        tags=tags or [],
+        level=level,
+        language=language,
+        sort=sort,
+        page=page or 1,
+    )
+
+
 @router.get("/tags/{name}", response_model=PaginatedCourse)
 async def by_tags(session: SessionDep, name: str, page: int | None = None):
     return await CourseService.list_by_tags(name, session, page or 1)
@@ -77,7 +120,7 @@ async def create_course(
     return await CourseService.create_course(session, data, current_user)
 
 
-@router.post("/section", response_model=SectionRead, status_code=201)
+@router.post("/section", response_model=SectionContentReadFull, status_code=201)
 async def create_section(
     data: Annotated[SectionCreate, Body()],
     session: SessionDep,
@@ -86,7 +129,7 @@ async def create_section(
     return await CourseService.create_section(session, data, current_user)
 
 
-@router.patch("/section/{section_id}", response_model=SectionRead)
+@router.patch("/section/{section_id}", response_model=SectionContentReadFull)
 async def update_section(
     section_id: str,
     data: Annotated[SectionUpdate, Body()],
@@ -103,7 +146,7 @@ async def delete_section(
     return await CourseService.delete_section(session, section_id, current_user)
 
 
-@router.get("/section/{section_id}", response_model=SectionRead)
+@router.get("/section/{section_id}", response_model=SectionContentReadFull)
 async def get_section(section_id: str, session: SessionDep):
     return await CourseService.get_section(session, section_id)
 
@@ -137,6 +180,13 @@ async def delete_module(
 @router.get("/module/{module_id}", response_model=ModuleReadMin)
 async def get_module(module_id: str, session: SessionDep):
     return await CourseService.get_module(session, module_id)
+
+
+@router.get("/module/full/{module_id}", response_model=ModuleRead)
+async def get_full_module(
+    module_id: str, session: SessionDep, current_user: CurrentActiveUser
+):
+    return await CourseService.get_full_module(session, module_id, current_user)
 
 
 @router.post("/video", response_model=VideoContentRead, status_code=201)
@@ -186,7 +236,7 @@ async def update_document(
     return await CourseService.update_document(session, document_id, data, current_user)
 
 
-@router.delete("document/{document_id}", status_code=204)
+@router.delete("/document/{document_id}", status_code=204)
 async def delete_document(
     document_id: str,
     session: SessionDep,
@@ -259,6 +309,15 @@ async def get_enrollment(
     return await CourseService.get_enrollment(course_id, session, current_user)
 
 
+@router.get("/{course_id}/progress", response_model=CourseProgressRead)
+async def get_progress(
+    course_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    return await CourseService.get_progress(course_id, session, current_user)
+
+
 @router.get("/{course_id}/ratings", response_model=PaginatedRatings)
 async def list_ratings(
     course_id: str, session: SessionDep, page: Annotated[int | None, Query()] = None
@@ -305,10 +364,10 @@ async def course_content(slug: str, session: SessionDep):
 
 @router.get("/{slug}/content/full", response_model=CourseContentReadFull)
 async def full_course_content(
-    slug: str, session: SessionDep, curren_user: CurrentActiveUser
+    slug: str, session: SessionDep, current_user: CurrentActiveUser
 ):
     # user must have enrolled first
-    return await CourseService.course_content_full(session, slug, curren_user)
+    return await CourseService.course_content_full(session, slug, current_user)
 
 
 @router.delete("/{course_id}/{course_slug}", status_code=204)
@@ -317,8 +376,10 @@ async def delete_course(course_id: str, course_slug: str, session: SessionDep):
 
 
 @router.get("/{slug}", response_model=CourseRead)
-async def course_detail(slug: str, session: SessionDep):
-    return await CourseService.course_detail(session, slug)
+async def course_detail(
+    slug: str, session: SessionDep, currentUser: CurrentActiveUserSilent
+):
+    return await CourseService.course_detail(session, slug, currentUser)
 
 
 @router.patch("/{course_slug}", response_model=CourseRead)

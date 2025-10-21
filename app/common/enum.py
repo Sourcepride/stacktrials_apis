@@ -141,3 +141,8 @@ class MediaType(str, Enum):
     DOCUMENT = "document"  # Word, PowerPoint, etc.
     VIDEO = "video"
     OTHER = "other"
+
+
+class AnnotationType(str, Enum):
+    NOTE = "note"
+    HIGHLIGHT = "highlight"

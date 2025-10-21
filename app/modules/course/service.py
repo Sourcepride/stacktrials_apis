@@ -3,21 +3,25 @@ from datetime import datetime, timezone
 from typing import Any, Optional, cast
 
 from fastapi import HTTPException, status
+from pydantic import HttpUrl
 from sqlalchemy import BinaryExpression, text
-from sqlmodel import Session, asc, col, desc, func, select, update
+from sqlmodel import Session, asc, col, desc, func, or_, select, update
 
 from app.common.constants import PER_PAGE
 from app.common.enum import (
     CourseStatus,
     DifficultyLevel,
+    DocumentPlatform,
     EnrollmentType,
+    MediaType,
     ModuleProgressStatus,
     ModuleType,
     SortCoursesBy,
+    VideoPlatform,
     VisibilityType,
 )
 from app.common.utils import paginate, slugify
-from app.core.dependencies import CurrentActiveUser
+from app.core.dependencies import CurrentActiveUser, CurrentActiveUserSilent
 from app.models.comments_model import Comment, CommentLike, Rating
 from app.models.courses_model import (
     Course,
@@ -33,6 +37,8 @@ from app.models.courses_model import (
 )
 from app.models.user_model import Account
 from app.modules import course
+from app.modules.media.router import validate_document_url
+from app.modules.media.service import URLValidator
 from app.schemas.courses import (
     CourseCommentCreate,
     CourseCommentRead,
@@ -51,9 +57,73 @@ from app.schemas.courses import (
     VideoContentCreate,
     VideoContentUpdate,
 )
+from app.schemas.media import DocumentItem
 
 
 class CourseService:
+
+    @staticmethod
+    async def explore_courses(
+        session: Session,
+        q: str | None = None,
+        tags: list[str] | None = None,
+        level: DifficultyLevel | None = None,
+        language: str | None = None,
+        sort: SortCoursesBy | None = None,
+        page: int = 1,
+        per_page: int = PER_PAGE,
+    ):
+        """
+        Combined explore filter: search, tags, difficulty, language, sorting.
+        """
+        base_query = (
+            select(Course)
+            .where(
+                Course.status == CourseStatus.PUBLISHED,
+                Course.visibility == VisibilityType.PUBLIC,
+            )
+            .group_by(Course.id)
+        )
+
+        # 🔍 Keyword search
+        if q:
+            pattern = f"%{q.lower()}%"
+            base_query = base_query.where(
+                or_(
+                    func.lower(Course.title).like(pattern),
+                    func.lower(Course.description).like(pattern),
+                )
+            )
+
+        # 🎯 Filter by tags
+        if tags:
+            tag_names = [t.strip().lower() for t in tags if t.strip()]
+            if tag_names:
+                base_query = (
+                    base_query.join(CourseTag)
+                    .join(Tag)
+                    .where(col(Tag.name).in_(tag_names))
+                    .group_by(Course.id)
+                )
+
+        # 📘 Filter by difficulty
+        if level:
+            base_query = base_query.where(Course.difficulty_level == level)
+
+        # 🌍 Filter by language
+        if language:
+            base_query = base_query.where(Course.language == language)
+
+        # 🔢 Sorting logic
+        if sort == SortCoursesBy.MOST_ENROLLED:
+            base_query = base_query.order_by(desc(Course.enrollment_count))
+        elif sort == SortCoursesBy.TOP_RATED:
+            base_query = base_query.order_by(desc(Course.average_rating))
+        else:
+            base_query = base_query.order_by(desc(Course.created_at))
+
+        # 📄 Paginate
+        return paginate(session, base_query, page, per_page)
 
     @staticmethod
     async def list_courses(
@@ -143,41 +213,48 @@ class CourseService:
             cleaned_data.get("title", ""), session
         )
 
+        tags = cleaned_data.pop("tags", [])
         course = Course(**cleaned_data, account_id=current_user.id, slug=slug)
 
         session.add(course)
         session.commit()
         session.refresh(course)
+
+        if tags:
+            CourseService._sync_course_tags(session, course, tags)
+
         return course
 
     @staticmethod
     async def update_course(
         session: Session, slug: str, data: CourseUpdate, current_user: Account
     ):
-        course = CourseService._get_course_or_404(slug, session)
-
-        if course.account_id != current_user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
-            )
+        course = CourseService._get_course_or_404(slug, session, current_user)
 
         cleaned_data = data.model_dump(exclude_unset=True)
         slug = course.slug
         title = cleaned_data.get("title", "")
 
-        if course.title != title:
+        if title and course.title != title:
             slug = CourseService._generate_course_slug(title, session)
 
+        tags = cleaned_data.pop("tags", None)
         course.sqlmodel_update({**cleaned_data, "slug": slug})
+        course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(course)
         session.commit()
         session.refresh(course)
+
+        if tags is not None:
+            CourseService._sync_course_tags(session, course, tags)
         return course
 
     @staticmethod
-    async def course_detail(session: Session, slug: str):
-        course = CourseService._get_course_or_404(slug, session)
+    async def course_detail(
+        session: Session, slug: str, currentUser: Optional[Account] = None
+    ):
+        course = CourseService._get_course_or_404(slug, session, currentUser)
 
         return course
 
@@ -188,7 +265,7 @@ class CourseService:
 
     @staticmethod
     async def course_content_full(session: Session, slug: str, current_user: Account):
-        course = CourseService._get_course_or_404(slug, session)
+        course = CourseService._get_course_or_404(slug, session, current_user)
         course_enrollment = session.exec(
             select(CourseEnrollment).where(
                 CourseEnrollment.course_id == course.id,
@@ -220,6 +297,7 @@ class CourseService:
         cleaned_data = data.model_dump(exclude_unset=True)
 
         section = Section(**cleaned_data)
+        course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(section)
         session.commit()
@@ -248,6 +326,7 @@ class CourseService:
 
         cleaned_data = data.model_dump(exclude_unset=True)
         section.sqlmodel_update(cleaned_data)
+        section.course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(section)
         session.commit()
@@ -311,6 +390,7 @@ class CourseService:
 
         cleaned_data = data.model_dump(exclude_unset=True)
         module = Module(**cleaned_data)
+        section.course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(module)
         session.commit()
@@ -339,6 +419,7 @@ class CourseService:
 
         cleaned_data = data.model_dump(exclude_unset=True)
         module.sqlmodel_update(cleaned_data)
+        module.section.course.updated_at = datetime.now(tz=timezone.utc)
 
         session.add(module)
         session.commit()
@@ -378,6 +459,32 @@ class CourseService:
         return module
 
     @staticmethod
+    async def get_full_module(session: Session, module_id: str, current_user: Account):
+        module = session.get(Module, module_id)
+
+        if not module:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="module not found"
+            )
+
+        course_enrollment = session.exec(
+            select(CourseEnrollment).where(
+                CourseEnrollment.course_id == module.section.course_id,
+                CourseEnrollment.account_id == current_user.id,
+            )
+        ).first()
+
+        if (
+            module.section.course.account_id != current_user.id
+            and not course_enrollment
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN, detail="permission denied"
+            )
+
+        return module
+
+    @staticmethod
     async def create_video(
         session: Session, data: VideoContentCreate, current_user: Account
     ):
@@ -385,9 +492,13 @@ class CourseService:
         await CourseService._run_module_checks(
             session, data.module_id, current_user.id, ModuleType.VIDEO
         )
+        validator_resp = await CourseService._validate_video(
+            data.video_url, data.platform
+        )
 
         cleaned_data = data.model_dump(exclude_unset=True)
         video = VideoContent(**cleaned_data)
+        video.embed_url = validator_resp.embed_url
 
         session.add(video)
         session.commit()
@@ -409,8 +520,13 @@ class CourseService:
             session, video.module_id, current_user.id, ModuleType.VIDEO
         )
 
+        validator_resp = await CourseService._validate_video(
+            data.video_url or video.video_url, data.platform or video.platform
+        )
+
         cleaned_data = data.model_dump(exclude_unset=True)
         video.sqlmodel_update(cleaned_data)
+        video.embed_url = validator_resp.embed_url
 
         session.add(video)
         session.commit()
@@ -442,8 +558,14 @@ class CourseService:
             session, data.module_id, current_user.id, ModuleType.DOCUMENT
         )
 
+        validator_resp = await CourseService._validate_document(
+            data.file_url, data.platform
+        )
+
         cleaned_data = data.model_dump(exclude_unset=True)
         doc = DocumentContent(**cleaned_data)
+        doc.embed_url = validator_resp.embed_url
+        doc.file_size_bytes = validator_resp.file_size
 
         session.add(doc)
         session.commit()
@@ -465,8 +587,14 @@ class CourseService:
             session, doc.module_id, current_user.id, ModuleType.DOCUMENT
         )
 
+        validator_resp = await CourseService._validate_document(
+            data.file_url or doc.file_url, data.platform or doc.platform
+        )
+
         cleaned_data = data.model_dump(exclude_unset=True)
         doc.sqlmodel_update(cleaned_data)
+        doc.embed_url = validator_resp.embed_url
+        doc.file_size_bytes = validator_resp.file_size
 
         session.add(doc)
         session.commit()
@@ -543,6 +671,20 @@ class CourseService:
             raise HTTPException(404, "not enrolled")
 
         return enrollment
+
+    @staticmethod
+    async def get_progress(course_id: str, session: Session, curent_user: Account):
+        progress = session.exec(
+            select(CourseProgress).where(
+                CourseProgress.course_id == course_id,
+                CourseProgress.account_id == curent_user.id,
+            )
+        ).first()
+
+        if not progress:
+            raise HTTPException(404, "no progress found")
+
+        return progress
 
     @staticmethod
     async def create_enrollment(
@@ -942,10 +1084,19 @@ class CourseService:
             )
 
     @staticmethod
-    def _get_course_or_404(slug: str, session: Session):
+    def _get_course_or_404(
+        slug: str, session: Session, currentUser: Optional[Account] = None
+    ):
         course = session.exec(select(Course).where(Course.slug == slug)).first()
+
         if not course:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "course not found")
+
+        if currentUser and currentUser.id == course.account_id:
+            return course
+        if course.status.value == "draft" or course.status.value == "archived":
+            raise HTTPException(status.HTTP_403_FORBIDDEN)
+
         return course
 
     @staticmethod
@@ -1003,3 +1154,79 @@ class CourseService:
         except Exception as e:
             session.rollback()
             raise e
+
+    @staticmethod
+    async def _validate_video(video_url: str, platform: VideoPlatform):
+        provider = DocumentPlatform.DROPBOX
+        if platform == VideoPlatform.YOUTUBE or platform == VideoPlatform.DAILYMOTION:
+            provider = DocumentPlatform.DIRECT_LINK
+        elif platform == VideoPlatform.GOOGLE_DRIVE:
+            provider = DocumentPlatform.GOOGLE_DRIVE
+
+        validator_resp = await URLValidator.validate_url_resource(
+            DocumentItem(
+                url=HttpUrl(video_url),
+                provider=provider,
+                media_type=MediaType.VIDEO,
+            )
+        )
+
+        if not validator_resp.is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid video"
+            )
+
+        return validator_resp
+
+    @staticmethod
+    async def _validate_document(file_url: str, platform: DocumentPlatform):
+        validator_resp = await URLValidator.validate_url_resource(
+            DocumentItem(
+                url=HttpUrl(file_url),
+                provider=platform,
+                media_type=MediaType.DOCUMENT,
+            )
+        )
+
+        if not validator_resp.is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="invalid document"
+            )
+
+        return validator_resp
+
+    @staticmethod
+    def _sync_course_tags(session: Session, course: Course, tag_names: list[str]):
+        """Create, reuse, or remove tags associated with a course."""
+        # Normalize tag names
+        new_tags = {t.strip().lower() for t in tag_names if t.strip()}
+        current_tags = {t.name for t in course.tags}
+
+        tags_to_add = new_tags - current_tags
+        tags_to_remove = current_tags - new_tags
+
+        # Remove old tags
+        if tags_to_remove:
+            for tag in list(course.tags):
+                if tag.name in tags_to_remove:
+                    tag.usage_count -= 1
+                    if tag.usage_count <= 0:
+                        session.delete(tag)
+                    else:
+                        session.add(tag)
+                    course.tags.remove(tag)
+
+        # Add or reuse tags
+        for name in tags_to_add:
+            existing_tag = session.exec(select(Tag).where(Tag.name == name)).first()
+            if existing_tag:
+                existing_tag.usage_count += 1
+                course.tags.append(existing_tag)
+            else:
+                new_tag = Tag(name=name, usage_count=1)
+                session.add(new_tag)
+                course.tags.append(new_tag)
+
+        session.add(course)
+        session.commit()
+        session.refresh(course)

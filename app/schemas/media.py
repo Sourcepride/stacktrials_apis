@@ -26,8 +26,8 @@ class DocumentValidationResponse(BaseModel):
 class DocumentItem(BaseModel):
     """Schema for external document items"""
 
-    url: HttpUrl
     provider: DocumentPlatform
+    url: HttpUrl
     media_type: MediaType
     title: Optional[str] = None
     description: Optional[str] = None
@@ -38,7 +38,7 @@ class DocumentItem(BaseModel):
         """Ensure URL is from allowed providers"""
         url_str = str(v)
 
-        is_external = values.get("provider") == DocumentPlatform.DIRECT_LINK.value
+        is_external = values.data.get("provider") == DocumentPlatform.DIRECT_LINK
 
         if is_external:
             return v
@@ -50,6 +50,7 @@ class DocumentItem(BaseModel):
             r"1drv\.ms",
             r"sharepoint\.com",
             r"dropbox\.com",
+            r"dl\.dropboxusercontent\.com",
         ]
 
         if not any(

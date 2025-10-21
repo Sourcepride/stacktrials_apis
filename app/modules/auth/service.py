@@ -5,7 +5,7 @@ from typing import Optional
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
-from fastapi import HTTPException, Request, Response
+from fastapi import BackgroundTasks, HTTPException, Request, Response
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
@@ -16,6 +16,7 @@ from sqlmodel import Session, select
 
 from app.common.constants import (
     ACCESS_TOKEN_MINUTES,
+    BASE_URL,
     DROPBOX_CLIENT_ID,
     DROPBOX_CLIENT_SECRET,
     FRONTEND_URL,
@@ -24,6 +25,7 @@ from app.common.constants import (
     GOOGLE_REDIRECT_URI,
     IS_DEV,
 )
+from app.common.email_utils import send_email
 from app.common.enum import Providers
 from app.common.mixins import MessagePatterns
 from app.common.utils import (
@@ -39,18 +41,24 @@ from app.models.user_model import Account, Profile
 from app.schemas.account import AccessToken, RefreshToken
 
 
-async def google_one_tap(response: Response, id_token: str, session: Session):
+async def google_one_tap(
+    id_token: str,
+    session: Session,
+    background_tasks: BackgroundTasks,
+    redirect: str | None = None,
+):
     userinfo = verify_google_auth_token(id_token)
     email = userinfo["email"]
     sub = userinfo["sub"]
 
-    return authorize_or_register(
+    return await authorize_or_register(
         session,
         email,
         Providers.GOOGLE,
         sub,
+        background_tasks,
         "openid email profile",
-        {"redirect": "/"},
+        {"redirect": redirect or "/en"},
     )
 
 
@@ -60,6 +68,7 @@ async def google_callback_handler(
     state: str | None,
     current_user: Optional[Account],
     redis: Redis,
+    background_tasks: BackgroundTasks,
 ):
 
     state_data = {}
@@ -88,11 +97,12 @@ async def google_callback_handler(
     refresh_token = token.get("refresh_token")
     scopes = token.get("scopes")
 
-    return authorize_or_register(
+    return await authorize_or_register(
         session,
         email,
         Providers.GOOGLE,
         sub,
+        background_tasks,
         scopes,
         state_data,
         access_token,
@@ -106,6 +116,7 @@ async def github_callback_handler(
     state: str | None,
     current_user: Optional[Account],
     redis: Redis,
+    background_tasks: BackgroundTasks,
 ):
 
     assert oauth.github is not None
@@ -139,11 +150,12 @@ async def github_callback_handler(
             )
             email = primary["email"]
 
-    return authorize_or_register(
+    return await authorize_or_register(
         session,
         email,
         Providers.GITHUB,
         provider_id,
+        background_tasks,
         "read:user user:email",
         state_data,
     )
@@ -273,17 +285,28 @@ async def google_incremental_auth(
 
     if needed_scopes.issubset(user_scopes):
         # Already has scopes, just return token
-        token_data = await get_google_access_token_from_refresh(current_user, session)
-        if redirect:
-            return RedirectResponse(
-                extract_redirect_uri(redirect, FRONTEND_URL), status_code=303
+
+        try:
+            token_data = await get_google_access_token_from_refresh(
+                current_user, session
             )
-        return JSONResponse(
-            {
-                "access_token": token_data["access_token"],
-                "expires_in": token_data["expires_in"],
-            }
-        )
+            if redirect:
+                return RedirectResponse(
+                    extract_redirect_uri(redirect, FRONTEND_URL), status_code=303
+                )
+            return JSONResponse(
+                {
+                    "access_token": token_data["access_token"],
+                    "expires_in": token_data["expires_in"],
+                }
+            )
+        except HTTPException as e:
+            if not (
+                e.status_code == 400
+                and isinstance(e.detail, dict)
+                and e.detail.get("error") == "invalid_grant"
+            ):
+                raise e
 
     csrf_token = secrets.token_hex(32)
 
@@ -437,11 +460,12 @@ async def replace_provider(
 # -------- HELPER FUNCTIONS ---------
 
 
-def authorize_or_register(
+async def authorize_or_register(
     session: Session,
     email: str,
     provider: Providers,
     provider_id: str,
+    background_tasks: BackgroundTasks,
     scopes: Optional[str] = None,
     state: dict = {},
     access_token: Optional[str] = None,
@@ -464,8 +488,25 @@ def authorize_or_register(
                 FRONTEND_URL + f"?message={MessagePatterns.MESSAGE_ACCOUNT_EXISTS}",
                 status_code=303,
             )
+        session.flush()
+        create_provider(session, user.id, provider, provider_id, scopes or "")
 
     session.commit()
+
+    if not existing:
+        await send_email(
+            background_tasks,
+            [user.email],
+            "Welcome to stacktrails",
+            "welcome.html",
+            {
+                "logo_url": BASE_URL + "/static/black-logo.svg",
+                "name": "Dear",
+                "img_url": BASE_URL + "/static/road-bro.svg",
+                "dashboard_url": FRONTEND_URL + "/dashboard",
+            },
+        )
+
     access, refresh = (
         create_jwt_token(str(user.id), email),
         create_jwt_token(str(user.id), email, "refresh"),
@@ -473,8 +514,8 @@ def authorize_or_register(
 
     if state.get("redirect"):
         secure = not IS_DEV
-        samesite = "lax"
-        cookie_domain = "localhost" if IS_DEV else None
+        samesite = "none" if not IS_DEV else "lax"
+        cookie_domain = "localhost" if IS_DEV else ".stacktrails.com"
 
         redirect_response = RedirectResponse(
             url=extract_redirect_uri(state.get("redirect", ""), FRONTEND_URL),
@@ -497,7 +538,7 @@ def authorize_or_register(
             httponly=True,
             secure=secure,
             samesite=samesite,
-            max_age=3600 * 7,
+            max_age=3600 * 24 * 30,
         )
 
         return redirect_response
@@ -527,6 +568,23 @@ def create_account(
         )
         session.add(account)
         return account
+
+
+def create_provider(
+    session: Session,
+    account_id: uuid.UUID,
+    provider: Providers,
+    provider_id: str,
+    scopes: str,
+):
+    obj = Provider(
+        provider_id=provider_id,
+        provider=provider,
+        account_id=account_id,
+        scopes=" ".join(scopes.split()),
+    )
+
+    session.add(obj)
 
 
 async def manual_oauth_callback(

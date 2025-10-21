@@ -1,7 +1,7 @@
 import secrets
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, Body, Form, Query, Request, Response
+from fastapi import APIRouter, BackgroundTasks, Body, Form, Query, Request, Response
 
 from app.common.constants import DROPBOX_REDIRECT_URI, GITHUB_REDIRECT_URI
 from app.common.utils import encode_state
@@ -10,9 +10,8 @@ from app.core.dependencies import (
     CurrentActiveUserSilent,
     RedisDep,
     SessionDep,
-    get_current_active_user,
 )
-from app.core.security import oauth, sign_state
+from app.core.security import create_jwt_token, oauth, sign_state
 from app.schemas.account import (
     AccessToken,
     GoogleTokenPayload,
@@ -67,22 +66,28 @@ async def google_callback(
     session: SessionDep,
     user: CurrentActiveUserSilent,
     redis: RedisDep,
+    background_tasks: BackgroundTasks,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return await google_callback_handler(request, session, state, user, redis)
+    return await google_callback_handler(
+        request, session, state, user, redis, background_tasks
+    )
 
 
 @router.post("/google-one-tap", response_model=Token)
 async def google_one_tab(
     token: Annotated[GoogleTokenPayload, Form()],
-    response: Response,
     session: SessionDep,
+    background_tasks: BackgroundTasks,
 ):
-    return await google_one_tap(response, token.credential, session)
+
+    return await google_one_tap(
+        token.credential, session, background_tasks, token.redirect
+    )
 
 
 @router.get("/github/login")
-async def github_login(request: Request, redirect: Annotated[Optional[bool], Query()]):
+async def github_login(request: Request, redirect: Annotated[Optional[str], Query()]):
     state_data = {}
     if redirect:
         state_data["redirect"] = redirect
@@ -103,9 +108,12 @@ async def github_callback(
     session: SessionDep,
     user: CurrentActiveUserSilent,
     redis: RedisDep,
+    background_tasks: BackgroundTasks,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return github_callback_handler(request, session, state, user, redis)
+    return await github_callback_handler(
+        request, session, state, user, redis, background_tasks
+    )
 
 
 @router.get("/providers/dropbox/login", description="add dropbox storage")
@@ -214,3 +222,9 @@ async def dropbox_access_token(
     current_user: CurrentActiveUser,
 ):
     return await get_dropbox_access_token_from_refresh(current_user, session)
+
+
+@router.get("/ws-shortlived", response_model=ShortLived)
+async def ws_shortlived_token(session: SessionDep, current_user: CurrentActiveUser):
+    token = create_jwt_token(str(current_user.id), current_user.email, "access", 1)
+    return {"access_token": token, "expires_in": 1}
