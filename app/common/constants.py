@@ -11,6 +11,7 @@ ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS")
 ALLOWED_IMAGE_ORIGIN = os.getenv("ALLOWED_IMAGE_ORIGIN")
 REDIS_URL = os.getenv("REDIS_URL")
 BASE_URL = os.getenv("BASE_URL", "http://localhost:8082")
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
 
 # JWT
 JWT_SECRET = os.getenv("JWT_SECRET")
