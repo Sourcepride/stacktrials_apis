@@ -1,9 +1,20 @@
 import secrets
 from typing import Annotated, Optional
 
-from fastapi import APIRouter, BackgroundTasks, Body, Form, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
+from sqlmodel import select
 
 from app.common.constants import DROPBOX_REDIRECT_URI, GITHUB_REDIRECT_URI
+from app.common.enum import Providers
 from app.common.utils import encode_state
 from app.core.dependencies import (
     CurrentActiveUser,
@@ -12,6 +23,7 @@ from app.core.dependencies import (
     SessionDep,
 )
 from app.core.security import create_jwt_token, oauth, sign_state
+from app.models.provider_model import Provider
 from app.schemas.account import (
     AccessToken,
     GoogleTokenPayload,
@@ -24,6 +36,7 @@ from .service import (
     dropbox_callback_handler,
     get_dropbox_access_token_from_refresh,
     get_google_access_token_from_refresh,
+    get_scopes_from_refresh_token,
     github_callback_handler,
     google_callback_handler,
     google_incremental_auth,
@@ -228,3 +241,51 @@ async def dropbox_access_token(
 async def ws_shortlived_token(session: SessionDep, current_user: CurrentActiveUser):
     token = create_jwt_token(str(current_user.id), current_user.email, "access", 1)
     return {"access_token": token, "expires_in": 1}
+
+
+@router.get("/verify-scopes")
+async def verify_google_scopes(
+    current_user: CurrentActiveUser,
+    session: SessionDep,
+    scopes: str = Query(..., description="Comma-separated scopes to check"),
+):
+    """
+    Verify if the user's stored Google refresh token still includes the required scopes.
+    """
+    required_scopes = set(scopes.split(","))
+
+    google_provider = session.exec(
+        select(Provider).where(
+            Provider.provider == Providers.GOOGLE,
+            Provider.account_id == current_user.id,
+        )
+    ).first()
+
+    if not google_provider or not google_provider.refresh_token:
+        return {
+            "ok": True,
+            "valid": False,
+            "missing_scopes": list(required_scopes),
+            "reason": "No Google provider or refresh token",
+        }
+
+    try:
+        current_scopes = await get_scopes_from_refresh_token(
+            google_provider.refresh_token
+        )
+    except HTTPException as e:
+        return {
+            "ok": False,
+            "valid": False,
+            "missing_scopes": list(required_scopes),
+            "reason": f"Token refresh failed: {e.detail}",
+        }
+
+    missing = required_scopes - current_scopes
+
+    return {
+        "ok": True,
+        "valid": len(missing) == 0,
+        "current_scopes": list(current_scopes),
+        "missing_scopes": list(missing),
+    }

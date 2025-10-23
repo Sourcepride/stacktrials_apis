@@ -1,7 +1,8 @@
 import json
 import secrets
 import uuid
-from typing import Optional
+from ast import Set
+from typing import Any, Optional
 from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
 
 import httpx
@@ -182,6 +183,33 @@ async def dropbox_callback_handler(request: Request, session: Session, redis: Re
     provider_id = user_info["account_id"]
 
     # TODO:  check if provider already exists show message to attach new provider
+
+    id_exists = bool(
+        session.exec(
+            select(Provider).where(
+                Provider.provider_id == provider_id,
+                Provider.provider == Providers.DROP_BOX,
+            )
+        ).first()
+    )
+
+    if id_exists:
+        redirect_uri = (
+            extract_redirect_uri(payload["redirect"], FRONTEND_URL)
+            if payload.get("redirect")
+            else "/"
+        )
+
+        redirect_uri = (
+            f"{redirect_uri}&message={MessagePatterns.MESSAGE_PROVIDER_ALREADY_ATTACHED}"
+            if redirect_uri.find("?")
+            else f"/?message={MessagePatterns.MESSAGE_PROVIDER_ALREADY_ATTACHED}"
+        )
+        return RedirectResponse(
+            redirect_uri,
+            status_code=303,
+        )
+
     provider = session.exec(
         select(Provider).where(
             Provider.account_id == account.id, Provider.provider == Providers.DROP_BOX
@@ -290,6 +318,10 @@ async def google_incremental_auth(
             token_data = await get_google_access_token_from_refresh(
                 current_user, session
             )
+
+            if not needed_scopes.issubset(token_data.get("scopes", set())):
+                raise HTTPException(400, detail={"error": "invalid_grant"})
+
             if redirect:
                 return RedirectResponse(
                     extract_redirect_uri(redirect, FRONTEND_URL), status_code=303
@@ -340,7 +372,7 @@ async def google_incremental_auth(
 
 async def get_google_access_token_from_refresh(
     current_user: Account, session: Session
-) -> dict[str, str]:
+) -> dict[str, Any]:
     google_provider = session.exec(
         select(Provider).where(
             Provider.provider == Providers.GOOGLE,
@@ -370,10 +402,18 @@ async def get_google_access_token_from_refresh(
         raise HTTPException(status_code=400, detail=r.json())
 
     token_data = r.json()
+    scope_str: str = token_data.get("scope", "")
+    scopes = set()
+
+    if not scope_str:
+        scopes = await get_scopes_from_refresh_token(refresh_token)
+    else:
+        scopes = set(scope_str.split())
 
     return {
         "access_token": token_data["access_token"],
         "expires_in": token_data["expires_in"],
+        "scopes": scopes,
     }
 
 
@@ -838,3 +878,39 @@ def create_confirm_url(redirectUrl: str, provider: Providers, temp_id: str):
     new_query = urlencode(query, doseq=True)
     new_url = urlunparse(parsed._replace(query=new_query))
     return new_url
+
+
+async def get_scopes_from_refresh_token(
+    refresh_token: str,
+) -> set[str]:
+    """
+    Use a Google refresh token to retrieve the currently authorized scopes.
+    Does not use or return the access token.
+    """
+
+    data = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        r = await client.post("https://oauth2.googleapis.com/token", data=data)
+
+    token_data = r.json()
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=400, detail=token_data)
+
+    scope_str = token_data.get("scope")
+    if not scope_str:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": "scope_missing",
+                "message": "No scopes returned by Google.",
+            },
+        )
+
+    return set(scope_str.split())
