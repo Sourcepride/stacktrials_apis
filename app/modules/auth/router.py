@@ -82,9 +82,13 @@ async def google_callback(
     background_tasks: BackgroundTasks,
     state: Annotated[Optional[str], Query()] = None,
 ):
-    return await google_callback_handler(
-        request, session, state, user, redis, background_tasks
-    )
+    try:
+        return await google_callback_handler(
+            request, session, state, user, redis, background_tasks
+        )
+    except Exception as e:
+        print("----------------", e)
+        raise e
 
 
 @router.post("/google-one-tap", response_model=Token)
