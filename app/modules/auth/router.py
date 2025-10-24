@@ -15,7 +15,7 @@ from fastapi import (
 )
 from sqlmodel import select
 
-from app.common.constants import DROPBOX_REDIRECT_URI, GITHUB_REDIRECT_URI
+from app.common.constants import DROPBOX_REDIRECT_URI, GITHUB_REDIRECT_URI, IS_DEV
 from app.common.enum import Providers
 from app.common.utils import encode_state
 from app.core.dependencies import (
@@ -187,13 +187,26 @@ async def refresh(
 
 @router.post("/logout")
 async def logout(response: Response):
-    # Clear the cookie by setting it to expire immediately
-    response.delete_cookie(
-        key="access_token",  # use the same key you used when setting it
-        path="/",  # must match original cookie path
-        domain=None,  # set if you had a domain originally
-    )
-    response.delete_cookie(key="refresh_token", path="/", domain=None)
+    cookie_params = {
+        "domain": None,  # localhost doesn’t support domain cookies
+        "secure": False,
+        "httponly": True,
+        "samesite": "lax",
+        "path": "/",
+    }
+
+    if not IS_DEV:
+        cookie_params = {
+            "domain": ".stacktrails.com",
+            "secure": True,
+            "httponly": True,
+            "samesite": "none",
+            "path": "/",
+        }
+
+    response.delete_cookie("access_token", **cookie_params)
+    response.delete_cookie("refresh_token", **cookie_params)
+
     return {"message": "Logged out successfully"}
 
 
