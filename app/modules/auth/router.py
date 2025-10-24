@@ -1,6 +1,8 @@
 import secrets
+import traceback
 from typing import Annotated, Optional
 
+import httpx
 from fastapi import (
     APIRouter,
     BackgroundTasks,
@@ -86,9 +88,19 @@ async def google_callback(
         return await google_callback_handler(
             request, session, state, user, redis, background_tasks
         )
+    except httpx.HTTPStatusError as e:
+        print("------ HTTP error while talking to Google ------")
+        print("Status code:", e.response.status_code)
+        print("Response body:", e.response.text)
+        traceback.print_exc()
+        raise
+
     except Exception as e:
-        print("----------------", e)
-        raise e
+        print("------ General exception ------")
+        print("Type:", type(e).__name__)
+        print("Message:", e)
+        traceback.print_exc()
+        raise
 
 
 @router.post("/google-one-tap", response_model=Token)
