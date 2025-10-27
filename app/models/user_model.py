@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Optional
 
 from sqlmodel import Field, Relationship, SQLModel
 
+from app.common.enum import UserRole
 from app.models.base import AppBaseModelMixin, AppSQLModel
 
 if TYPE_CHECKING:
@@ -21,6 +22,8 @@ class AccountBase(AppSQLModel):
         index=True, unique=True, nullable=True, default=None
     )
     is_active: bool = Field(default=True)
+    is_super_user: bool = Field(default=False)
+    role: UserRole = Field(default=UserRole.USER)
 
 
 class Account(AppBaseModelMixin, AccountBase, table=True):
