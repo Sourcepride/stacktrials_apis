@@ -540,9 +540,9 @@ async def authorize_or_register(
             "Welcome to stacktrails",
             "welcome.html",
             {
-                "logo_url": BASE_URL + "/static/black-logo.svg" + "?v=1",
+                "logo_url": BASE_URL + "/static/black-logo.png",
                 "name": "Dear",
-                "img_url": BASE_URL + "/static/road-bro.svg" + "?v=1",
+                "img_url": BASE_URL + "/static/road-bro.png",
                 "dashboard_url": FRONTEND_URL + "/dashboard",
             },
         )
