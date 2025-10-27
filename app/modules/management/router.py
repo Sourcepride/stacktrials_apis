@@ -21,3 +21,8 @@ async def contact(
         {"title": data.title, "message": data.message},
     )
     return {"success": True, "message": "thanks for your feedback"}
+
+
+@router.get("/accounts")
+async def accounts():
+    pass

@@ -146,3 +146,8 @@ class MediaType(str, Enum):
 class AnnotationType(str, Enum):
     NOTE = "note"
     HIGHLIGHT = "highlight"
+
+
+class UserRole(str, Enum):
+    USER = "user"
+    ADMIN = "admin"
