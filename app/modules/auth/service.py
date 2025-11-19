@@ -1,9 +1,8 @@
 import json
 import secrets
 import uuid
-from ast import Set
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 from fastapi import BackgroundTasks, HTTPException, Request, Response
@@ -12,7 +11,6 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
 from google.oauth2 import id_token
 from redis.asyncio import Redis
-from requests import request
 from sqlmodel import Session, select
 
 from app.common.constants import (
@@ -35,7 +33,6 @@ from app.common.utils import (
     extract_redirect_uri,
     generate_random_username,
 )
-from app.core.dependencies import SessionDep
 from app.core.security import create_jwt_token, decode_token, oauth, verify_state
 from app.models.provider_model import Provider
 from app.models.user_model import Account, Profile

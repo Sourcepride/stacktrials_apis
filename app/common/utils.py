@@ -5,10 +5,11 @@ import random
 import re
 import string
 import unicodedata
-from typing import Any, List, Optional, TypeVar, Union
+from typing import Any, Awaitable, Callable, List, Optional, TypeVar, Union
 from urllib.parse import urljoin, urlparse
 
 from cryptography.fernet import Fernet
+from fastapi import HTTPException, WebSocketException
 from sqlalchemy import Select, func
 from sqlmodel import Session, SQLModel, select
 
@@ -164,3 +165,26 @@ def extract_redirect_uri(redirect: str, base_url: str):
 
 def accepted_mime():
     pass
+
+
+def ws_code_from_http_code(code: int):
+    if code == 500:
+        return 1011
+    if code == 404 or code == 403:
+        return 1008
+    if code == 400:
+        return 1002
+    return code
+
+
+async def websocket_error_wrapper(
+    async_func: Callable[..., Awaitable[Any]], *args, **kwargs
+):
+    try:
+        return await async_func()
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise WebSocketException(ws_code_from_http_code(e.status_code), e.detail)
+        raise WebSocketException(
+            ws_code_from_http_code(1011), "An internal server error occurred"
+        )

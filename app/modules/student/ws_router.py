@@ -2,12 +2,11 @@ import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from sqlmodel import Session
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.common.redis_client import get_redis
 from app.common.ws_manager import manager
-from app.core.dependencies import CurrentActiveUser, CurrentWSUser, SessionDep
+from app.core.dependencies import CurrentWSUser, SessionDep
 from app.models.annotation_model import DocumentAnnotation
 
 router = APIRouter()
@@ -17,7 +16,7 @@ def doc_channel(doc_id: str):
     return f"document:{doc_id}:annotations"
 
 
-@router.websocket("/ws/documents/{doc_id}/annotations")
+@router.websocket("/{doc_id}/annotations")
 async def annotation_ws(
     websocket: WebSocket,
     doc_id: str,

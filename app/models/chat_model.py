@@ -29,7 +29,6 @@ class ChatBase(AppSQLModel):
         index=True, default=None
     )  # Only for group chats
     is_active: bool = Field(default=True)
-    max_members: Optional[int] = Field(default=None, ge=2, le=50)
 
 
 class Chat(AppBaseModelMixin, ChatBase, table=True):
@@ -43,6 +42,7 @@ class Chat(AppBaseModelMixin, ChatBase, table=True):
     course_id: Optional[str] = Field(
         foreign_key="course.id", default=None, ondelete="SET NULL"
     )  # Optional course association
+    max_members: Optional[int] = Field(default=None, ge=2, le=50)
 
     # Relationships
     course: Optional["Course"] = Relationship(back_populates="chats")
@@ -97,6 +97,7 @@ class ChatMember(AppBaseModelMixin, ChatMemberBase, table=True):
     last_read_message_id: Optional[uuid.UUID] = Field(
         default=None,
     )
+    is_creator: bool = Field(default=False)
 
     # Relationships
     chat: Chat = Relationship(back_populates="members")
@@ -170,21 +171,15 @@ class Message(AppBaseModelMixin, MessageBase, table=True):
     chat: Chat = Relationship(back_populates="messages")
     sender: Optional["ChatMember"] = Relationship(
         back_populates="messages",
-        sa_relationship_kwargs={"foreign_keys": "[Message.sender_id]"},
     )
     reply_to: Optional["Message"] = Relationship(
         back_populates="replies",
         sa_relationship_kwargs={
-            "remote_side": "[Message.id]",
-            "foreign_keys": "[Message.reply_to_id]",
+            "remote_side": "Message.id",
         },
     )
     replies: list["Message"] = Relationship(
         back_populates="reply_to",
-        sa_relationship_kwargs={
-            "foreign_keys": "[Message.reply_to_id]",
-            "overlaps": "reply_to",
-        },
     )
     reactions: list["MessageReaction"] = Relationship(
         back_populates="message", cascade_delete=True

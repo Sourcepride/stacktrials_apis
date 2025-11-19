@@ -85,7 +85,6 @@ class CourseService:
             .group_by(Course.id)
         )
 
-        # 🔍 Keyword search
         if q:
             pattern = f"%{q.lower()}%"
             base_query = base_query.where(
@@ -106,15 +105,13 @@ class CourseService:
                     .group_by(Course.id)
                 )
 
-        # 📘 Filter by difficulty
         if level:
             base_query = base_query.where(Course.difficulty_level == level)
 
-        # 🌍 Filter by language
         if language:
             base_query = base_query.where(Course.language == language)
 
-        # 🔢 Sorting logic
+        #  Sorting logic
         if sort == SortCoursesBy.MOST_ENROLLED:
             base_query = base_query.order_by(desc(Course.enrollment_count))
         elif sort == SortCoursesBy.TOP_RATED:
@@ -122,7 +119,6 @@ class CourseService:
         else:
             base_query = base_query.order_by(desc(Course.created_at))
 
-        # 📄 Paginate
         return paginate(session, base_query, page, per_page)
 
     @staticmethod

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -8,12 +9,25 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.common.constants import ALLOWED_ORIGINS, IS_DEV, SECRET_KEY
 from app.common.utils import safe_json_loads
+from app.common.ws_manager import RedisPubSubManager
 from app.core.exceptions import setup_logger
-from app.modules import creator, management, media, student
+from app.modules import chat, creator, management, media, student
 
 from .modules import account, auth, course, media
 
-app = FastAPI()
+manager = RedisPubSubManager()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        await manager.connect()
+        yield
+    finally:
+        await manager.close()
+
+
+app = FastAPI(lifespan=lifespan)
 app_logger = setup_logger()
 
 
@@ -80,4 +94,5 @@ app.include_router(
 app.include_router(
     management.router.router, prefix=f"{version_1}/management", tags=["management"]
 )
-app.include_router(student.ws_router.router)
+app.include_router(student.ws_router.router, prefix="/ws/documents")
+app.include_router(chat.ws_router.router, prefix="/ws/chat")
