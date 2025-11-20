@@ -29,6 +29,9 @@ class ChatBase(AppSQLModel):
         index=True, default=None
     )  # Only for group chats
     is_active: bool = Field(default=True)
+    last_message_at: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc)
+    )
 
 
 class Chat(AppBaseModelMixin, ChatBase, table=True):

@@ -1,14 +1,23 @@
+import uuid
+from typing import Optional
+
 from fastapi import HTTPException, WebSocketException
-from sqlalchemy import outerjoin
-from sqlmodel import Session, and_, col, func, or_, select
+from sqlmodel import Session, and_, col, desc, func, or_, select
 
 from app.common.constants import PER_PAGE
-from app.common.enum import ChatType, MemberRole, MemberStatus
+from app.common.enum import ChatType, GroupChatPrivacy, MemberRole, MemberStatus
 from app.common.utils import paginate, ws_code_from_http_code
-from app.models.chat_model import Chat, ChatMember, Message
+from app.models.chat_model import Chat, ChatMember, Message, MessageReaction
+from app.models.courses_model import Course, CourseEnrollment
 from app.models.user_model import Account, Profile
 from app.schemas.annotations import ChatMessage
-from app.schemas.chat import ChatMessageUpdate, ChatMessageWrite, ChatUpdate, ChatWrite
+from app.schemas.chat import (
+    ChatMessageReactionWrite,
+    ChatMessageUpdate,
+    ChatMessageWrite,
+    ChatUpdate,
+    ChatWrite,
+)
 
 
 class ChatService:
@@ -27,14 +36,41 @@ class ChatService:
 
     @staticmethod
     async def list_messages(
-        chat_id: str, session: Session, current_user: Account, page=1, per_page=PER_PAGE
+        chat_id: str,
+        session: Session,
+        current_user: Account,
+        last_message_id: Optional[int] = None,
+        cursor_type: Optional[str] = None,
+        limit: int = PER_PAGE,
     ):
         await ChatService.get_chat_or_raise(chat_id, str(current_user.id), session)
-        messages = select(Message).where(
+        query = select(Message).where(
             Message.chat_id == chat_id, Message.is_deleted == False
         )
 
-        return paginate(session, messages, page, per_page)
+        total_messages = session.exec(
+            select(func.count()).select_from(query.froms[0])
+        ).one()
+
+        if last_message_id:
+            last_message = session.exec(
+                select(Message).where(Message.id == last_message_id)
+            ).first()
+
+            if last_message and cursor_type == "before":
+                query = query.where(Message.created_at < last_message.created_at)
+            elif last_message and cursor_type == "after":
+                query = query.where(Message.created_at > last_message.created_at)
+
+        query = query.order_by(desc(Message.created_at)).limit(limit)
+        messages = session.exec(query).all()
+
+        return {
+            "items": messages,
+            "last_message_id": messages[len(messages) - 1].id,
+            "recent_message_id": messages[0].id,
+            "next": total_messages <= len(messages),
+        }
 
     @staticmethod
     async def list_chat(
@@ -79,11 +115,60 @@ class ChatService:
             # (Matches Chat Name) OR (Matches Member Name AND is Direct Chat)
             query = query.where(or_(text_filters, col(Chat.id).in_(member_subquery)))
 
+        query.order_by(desc(Chat.last_message_at))
+
         return paginate(session, query, page, per_page)
 
     @staticmethod
-    async def list_all_public_chat():
-        pass
+    async def list_all_public_chat(
+        q: str | None,
+        session: Session,
+        current_user: Account,
+        page=1,
+        per_page=PER_PAGE,
+    ):
+        """
+        Return all public chats where:
+        1) The current user is enrolled in the course linked to the chat
+        2) OR the current user is the creator of the course linked to the chat
+        3) OR the chat has no course attached
+        """
+
+        # Base: only PUBLIC chats
+        query = select(Chat).where(
+            Chat.privacy == GroupChatPrivacy.PUBLIC, Chat.chat_type == ChatType.GROUP
+        )
+
+        if q:
+            pattern = f"%{q.lower()}%"
+            query = query.where(
+                or_(
+                    func.lower(Chat.description).like(pattern),
+                    func.lower(Chat.name).like(pattern),
+                )
+            )
+
+        # OUTER JOIN so chats without courses are still included
+        query = query.outerjoin(
+            Course, Chat.course_id == Course.id  # type: ignore[arg-type]
+        ).outerjoin(
+            CourseEnrollment, CourseEnrollment.course_id == Course.id  # type: ignore[arg-type]
+        )
+
+        query = query.where(
+            or_(
+                # User enrolled in the course
+                CourseEnrollment.account_id == current_user.id,
+                # User is the creator of the course
+                Course.account_id == current_user.id,
+                # Chat has no course attached
+                col(Chat.course_id).is_(None),
+            )
+        )
+
+        query.order_by(desc(Chat.last_message_at))
+
+        return paginate(session, query, page, per_page)
 
     @staticmethod
     async def create_chat(session: Session, current_user: Account, data: ChatWrite):
@@ -232,20 +317,24 @@ class ChatService:
     async def create_message(
         session: Session, current_user: Account, data: ChatMessageWrite
     ):
-
-        await ChatService.get_chat_or_raise(
+        chat = await ChatService.get_chat_or_raise(
             str(data.chat_id), str(current_user.id), session
         )
+
         cleaned_data = data.model_dump()
-        message = Message(
-            **cleaned_data,
-        )
-        message.sender_id = current_user.id
-
+        message = Message(**cleaned_data, sender_id=current_user.id)
         session.add(message)
-        session.commit()
-        session.refresh(message)
+        session.flush()
 
+        session.refresh(chat)
+
+        if message.created_at > chat.last_message_at:
+            chat.last_message_at = message.created_at
+            session.add(chat)
+
+        session.commit()
+
+        session.refresh(message)
         return message
 
     @staticmethod
@@ -296,6 +385,93 @@ class ChatService:
 
         message.is_deleted = True
         session.add(message)
+        session.commit()
+        session.refresh(message)
+        return message
+
+    @staticmethod
+    async def accept_invite():
+        """accept invite
+        check the token and then if the expiry date is none or
+        not expired
+        check if the user is enrolled
+        if the user is enrolled for the course then the user can be added
+        """
+
+    @staticmethod
+    async def create_invite():
+        """
+        here create an invite
+        check if the user account exists
+        if it exists then send out a notification
+        and an email to the user in question
+        """
+
+    @staticmethod
+    async def add_directly():
+        """
+        users in a group should be able to directly chat group members
+        or privately message coure creator or other learners via comment
+        section
+
+        create a direct chat
+        check if account exists and is enrolled in same course
+        create a member afterwards by adding the member to the chat
+        """
+
+    @staticmethod
+    async def join_public_group():
+        """
+        using the chat_id
+        we check if the chat exists
+        check if user is enrolled in the course if course is available
+        if user is not enrolled in the course then they should get a permission denied
+        else a chat member is created
+        """
+
+    @staticmethod
+    async def set_last_message_read():
+        """
+        this is used to set the last message read for the chat member
+        checks if the member exists and the current user is the memmber
+        then checks if the message exists for that chat else raises a 404
+        update the last message read id after checks passed
+        """
+
+    @staticmethod
+    async def create_delete_reaction(
+        session: Session,
+        current_user: Account,
+        message_id: str,
+        data: ChatMessageReactionWrite,
+    ):
+        message = session.exec(select(Message).where(Message.id == message_id)).first()
+
+        if not message:
+            raise HTTPException(404, "message not found")
+
+        await ChatService.get_chat_or_raise(
+            str(message.chat_id), str(current_user.id), session
+        )
+
+        reaction = session.exec(
+            select(MessageReaction).where(
+                MessageReaction.emoji == data.emoji,
+                MessageReaction.account_id == current_user.id,
+            )
+        ).first()
+
+        if reaction:
+            session.delete(reaction)
+            session.commit()
+            session.refresh(message)
+            return message
+
+        reaction = MessageReaction(**data.model_dump())
+        reaction.account_id = current_user.id
+        reaction.message_id = uuid.UUID(message_id)
+
+        session.add(reaction)
         session.commit()
         session.refresh(message)
         return message
