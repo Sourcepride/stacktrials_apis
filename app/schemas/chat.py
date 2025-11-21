@@ -63,6 +63,20 @@ class ChatMessageRead(MessageBase):
     reactions: list[ChatMessageReactionRead] = []
 
 
+class ChatAndUnReadCount(BaseModel):
+    chat: ChatRead
+    unread_count: int
+    has_reply: bool
+
+
+class PaginatedChatResp(PaginatedSchema):
+    items: list[ChatAndUnReadCount]
+
+
+class PaginatedPublicChatResp(PaginatedSchema):
+    items: list[ChatRead]
+
+
 class ChatMessageWrite(MessageBase):
     chat_id: uuid.UUID
     reply_to_id: Optional[uuid.UUID] = None

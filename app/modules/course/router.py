@@ -65,7 +65,7 @@ async def list_courses(
 
 @router.get("/tags", response_model=list[TagRead])
 async def list_tags(session: SessionDep):
-    tags = session.exec(select(Tag).order_by(desc(Tag.usage_count))).all()
+    tags = (await session.exec(select(Tag).order_by(desc(Tag.usage_count)))).all()
     return tags
 
 

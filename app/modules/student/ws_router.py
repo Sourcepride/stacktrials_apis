@@ -20,7 +20,7 @@ def doc_channel(doc_id: str):
 async def annotation_ws(
     websocket: WebSocket,
     doc_id: str,
-    session: SessionDep,
+    session: AsyncSessionDep,
     current_user: CurrentWSUser,
 ):
     """WebSocket endpoint for live document annotation sync."""

@@ -1,21 +1,24 @@
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.user_model import Account, Profile
 from app.schemas.account import ProfileInformation, ProfileUpdate
 
 
-async def my_account(session: Session, current_user: Account):
+async def my_account(session: AsyncSession, current_user: Account):
 
-    session.refresh(current_user)
+    await session.refresh(current_user)
 
     return current_user
 
 
-async def get_profile(u: str, session: Session):
-    result = session.exec(
-        select(Profile, Account.username).join(Account).where(Account.username == u)
+async def get_profile(u: str, session: AsyncSession):
+    result = (
+        await session.exec(
+            select(Profile, Account.username).join(Account).where(Account.username == u)
+        )
     ).first()
 
     if not result:
@@ -30,10 +33,12 @@ async def get_profile(u: str, session: Session):
 
 
 async def update_current_profile(
-    username: str, current_user: Account, data: ProfileUpdate, session: Session
+    username: str, current_user: Account, data: ProfileUpdate, session: AsyncSession
 ):
-    result = session.exec(
-        select(Profile, Account).join(Account).where(Account.username == username)
+    result = (
+        await session.exec(
+            select(Profile, Account).join(Account).where(Account.username == username)
+        )
     ).first()
 
     if not result:
@@ -48,34 +53,37 @@ async def update_current_profile(
 
     profile.sqlmodel_update(cleaned_data)
     session.add(profile)
-    session.commit()
+    await session.commit()
 
-    session.refresh(profile)
+    await session.refresh(profile)
 
     return ProfileInformation(username=username, **jsonable_encoder(profile))
 
 
-async def update_username(username: str, current_user: Account, session: Session):
-    username_taken = session.exec(
-        select(Account).where(Account.username == username)
+async def update_username(username: str, current_user: Account, session: AsyncSession):
+    username_taken = (
+        await session.exec(select(Account).where(Account.username == username))
     ).first()
 
     if username_taken:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "username taken")
 
     current_user.username = username
-    session.commit()
+    session.add(current_user)
+    await session.commit()
 
     return {"ok": True}
 
 
-async def find_username(username: str, session: Session):
-    account = session.exec(select(Account).where(Account.username == username)).first()
+async def find_username(username: str, session: AsyncSession):
+    account = (
+        await session.exec(select(Account).where(Account.username == username))
+    ).first()
 
     return {"ok": bool(account)}
 
 
-async def delete_user_account(current_user: Account, session: Session):
-    session.delete(current_user)
-    session.commit()
+async def delete_user_account(current_user: Account, session: AsyncSession):
+    await session.delete(current_user)
+    await session.commit()
     return {"ok": True}

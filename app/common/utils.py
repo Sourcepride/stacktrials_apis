@@ -11,19 +11,22 @@ from urllib.parse import urljoin, urlparse
 from cryptography.fernet import Fernet
 from fastapi import HTTPException, WebSocketException
 from sqlalchemy import Select, func
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE, SECRET_KEY
 from app.models.user_model import Account
 
 
-def generate_random_username(session: Session, name: str, addons: int = 8) -> str:
+async def generate_random_username(
+    session: AsyncSession, name: str, addons: int = 8
+) -> str:
     while True:
         username = f"{name}@" + "".join(
             random.choices(string.ascii_lowercase + string.digits, k=addons)
         )
-        username_exists = session.exec(
-            select(Account).where(Account.username == username)
+        username_exists = (
+            await session.exec(select(Account).where(Account.username == username))
         ).first()
 
         if not username_exists:
@@ -40,8 +43,8 @@ def safe_json_loads(data, default=None):
 T = TypeVar("T", bound=SQLModel)
 
 
-def paginate(
-    session: Session,
+async def paginate(
+    session: AsyncSession,
     selected_model: Union[type[T], Select],
     page: int = 1,
     per_page: int = PER_PAGE,
@@ -82,7 +85,7 @@ def paginate(
             # For simple queries, count the table directly
             count_query = select(func.count()).select_from(query.froms[0])
 
-        total = session.exec(count_query).one()
+        total = (await session.exec(count_query)).one()
     except Exception as e:
         # Fallback: try a simpler count approach
         try:

@@ -8,6 +8,7 @@ websockets==15.0.1
 # --- Database & async drivers ---
 psycopg2-binary==2.9.10
 redis
+asyncpg==0.30.0
 
 # --- Email & templating ---
 fastapi-mail==1.5.6 

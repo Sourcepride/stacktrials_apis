@@ -2,7 +2,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
-from sqlmodel import Session, asc, col, desc, func, select
+from sqlmodel import asc, col, desc, func, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE
 from app.common.enum import EnrollmentStatus
@@ -21,22 +22,28 @@ from app.schemas.courses import LearnerStat
 
 class StudentService:
     @staticmethod
-    async def dashboard_stats(current_user: Account, session: Session):
-        total_completed = session.exec(
-            select(func.count(col(CourseEnrollment.id))).where(
-                CourseEnrollment.account_id == current_user.id,
-                CourseEnrollment.completion_date != None,
+    async def dashboard_stats(current_user: Account, session: AsyncSession):
+        total_completed = (
+            await session.exec(
+                select(func.count(col(CourseEnrollment.id))).where(
+                    CourseEnrollment.account_id == current_user.id,
+                    CourseEnrollment.completion_date != None,
+                )
             )
         ).one()
-        in_progress = session.exec(
-            select(func.count(col(CourseEnrollment.id))).where(
-                CourseEnrollment.account_id == current_user.id,
-                CourseEnrollment.completion_date == None,
+        in_progress = (
+            await session.exec(
+                select(func.count(col(CourseEnrollment.id))).where(
+                    CourseEnrollment.account_id == current_user.id,
+                    CourseEnrollment.completion_date == None,
+                )
             )
         ).one()
-        created_courses = session.exec(
-            select(func.count(col(Course.id))).where(
-                Course.account_id == current_user.id
+        created_courses = (
+            await session.exec(
+                select(func.count(col(Course.id))).where(
+                    Course.account_id == current_user.id
+                )
             )
         ).one()
 
@@ -48,7 +55,10 @@ class StudentService:
 
     @staticmethod
     async def enrolled(
-        current_user: Account, session: Session, page: int = 1, per_page: int = PER_PAGE
+        current_user: Account,
+        session: AsyncSession,
+        page: int = 1,
+        per_page: int = PER_PAGE,
     ):
         enrolled = (
             select(Course, CourseEnrollment)
@@ -57,7 +67,7 @@ class StudentService:
             .order_by(desc(CourseEnrollment.enrollment_date))
         )
 
-        results = paginate(session, enrolled, page, per_page)
+        results = await paginate(session, enrolled, page, per_page)
 
         items: list[tuple[Course, CourseEnrollment]] = list(results.get("items", []))
 
@@ -72,71 +82,87 @@ class StudentService:
         pass
 
     @staticmethod
-    async def get_annotations(doc_id: str, current_user: Account, session: Session):
-        return session.exec(
-            select(DocumentAnnotation).where(
-                DocumentAnnotation.account_id == current_user.id,
-                DocumentAnnotation.document_id == doc_id,
+    async def get_annotations(
+        doc_id: str, current_user: Account, session: AsyncSession
+    ):
+        return (
+            await session.exec(
+                select(DocumentAnnotation).where(
+                    DocumentAnnotation.account_id == current_user.id,
+                    DocumentAnnotation.document_id == doc_id,
+                )
             )
         ).all()
 
     @staticmethod
     async def toggle_module_completion_status(
-        current_user: Account, session: Session, module_id: str, status: bool = True
+        current_user: Account,
+        session: AsyncSession,
+        module_id: str,
+        status: bool = True,
     ):
         resp = await StudentService._toggle_module_status(
             current_user, session, module_id, status
         )
 
-        session.commit()
+        await session.commit()
 
-        session.refresh(resp[0])
+        await session.refresh(resp[0])
 
         return resp[0]
 
     @staticmethod
     async def increment_progress(
-        current_user: Account, session: Session, module_id: str
+        current_user: Account, session: AsyncSession, module_id: str
     ):
-
-        module = session.exec(select(Module).where(Module.id == module_id)).first()
+        module = (
+            await session.exec(select(Module).where(Module.id == module_id))
+        ).first()
 
         if not module:
             raise HTTPException(404, "module not found")
 
-        progress = session.exec(
-            select(CourseProgress).where(
-                CourseProgress.account_id == current_user.id,
-                CourseProgress.course_id == module.section.course_id,
+        progress = (
+            await session.exec(
+                select(CourseProgress).where(
+                    CourseProgress.account_id == current_user.id,
+                    CourseProgress.course_id == module.section.course_id,
+                )
             )
         ).first()
 
         if not progress:
             raise HTTPException(404, "progress not found make sure you have enrolled")
 
-        enrollment = session.exec(
-            select(CourseEnrollment).where(
-                CourseEnrollment.account_id == current_user.id,
-                CourseEnrollment.course_id == module.section.course_id,
+        enrollment = (
+            await session.exec(
+                select(CourseEnrollment).where(
+                    CourseEnrollment.account_id == current_user.id,
+                    CourseEnrollment.course_id == module.section.course_id,
+                )
             )
         ).first()
 
         if not enrollment:
             raise HTTPException(404, "enrollment not found")
 
-        last_section = session.exec(
-            select(Section)
-            .where(Section.course_id == module.section.course_id)
-            .order_by(desc(Section.order_index))
+        last_section = (
+            await session.exec(
+                select(Section)
+                .where(Section.course_id == module.section.course_id)
+                .order_by(desc(Section.order_index))
+            )
         ).first()
 
         if not last_section:
             raise HTTPException(404, "last section not found")
 
-        last_module = session.exec(
-            select(Module)
-            .where(Module.section_id == last_section.id)
-            .order_by(desc(Module.order_index))
+        last_module = (
+            await session.exec(
+                select(Module)
+                .where(Module.section_id == last_section.id)
+                .order_by(desc(Module.order_index))
+            )
         ).first()
 
         if not last_module:
@@ -148,26 +174,30 @@ class StudentService:
         enrollment.last_accessed = now
 
         if last_module and last_module.order_index != module.order_index:
-            next_module = session.exec(
-                select(Module)
-                .where(
-                    Module.section_id == module.section_id,
-                    Module.order_index > module.order_index,
+            next_module = (
+                await session.exec(
+                    select(Module)
+                    .where(
+                        Module.section_id == module.section_id,
+                        Module.order_index > module.order_index,
+                    )
+                    .order_by(asc(Module.order_index))
                 )
-                .order_by(asc(Module.order_index))
             ).first()
 
             if next_module:
                 updates["next_module"] = next_module.id
                 updates["next_section"] = next_module.section_id
             else:
-                next_section = session.exec(
-                    select(Section)
-                    .where(
-                        Section.course_id == module.section.course_id,
-                        Section.order_index > module.section.order_index,
+                next_section = (
+                    await session.exec(
+                        select(Section)
+                        .where(
+                            Section.course_id == module.section.course_id,
+                            Section.order_index > module.section.order_index,
+                        )
+                        .order_by(asc(Section.order_index))
                     )
-                    .order_by(asc(Section.order_index))
                 ).first()
 
                 if not next_section:
@@ -199,17 +229,21 @@ class StudentService:
         progress.sqlmodel_update(updates)
 
         session.add(progress)
-        session.commit()
+        await session.commit()
+        await session.refresh(progress)
 
-        session.refresh(progress)
         return progress
 
     @staticmethod
-    async def get_progress(current_user: Account, session: Session, course_id: str):
-        progress = session.exec(
-            select(CourseProgress).where(
-                CourseProgress.account_id == current_user.id,
-                CourseProgress.course_id == course_id,
+    async def get_progress(
+        current_user: Account, session: AsyncSession, course_id: str
+    ):
+        progress = (
+            await session.exec(
+                select(CourseProgress).where(
+                    CourseProgress.account_id == current_user.id,
+                    CourseProgress.course_id == course_id,
+                )
             )
         ).first()
 
@@ -220,27 +254,36 @@ class StudentService:
 
     @staticmethod
     async def _toggle_module_status(
-        current_user: Account, session: Session, module_id: str, status: bool = True
+        current_user: Account,
+        session: AsyncSession,
+        module_id: str,
+        status: bool = True,
     ):
 
-        module = session.exec(select(Module).where(Module.id == module_id)).first()
+        module = (
+            await session.exec(select(Module).where(Module.id == module_id))
+        ).first()
         if not module:
             raise HTTPException(404, "Module not found")
 
-        progress = session.exec(
-            select(CourseProgress).where(
-                CourseProgress.account_id == current_user.id,
-                CourseProgress.course_id == module.section.course_id,
+        progress = (
+            await session.exec(
+                select(CourseProgress).where(
+                    CourseProgress.account_id == current_user.id,
+                    CourseProgress.course_id == module.section.course_id,
+                )
             )
         ).first()
 
         if not progress:
             raise HTTPException(404, "Progress not found. Make sure you have enrolled.")
 
-        enrollment = session.exec(
-            select(CourseEnrollment).where(
-                CourseEnrollment.account_id == current_user.id,
-                CourseEnrollment.course_id == module.section.course_id,
+        enrollment = (
+            await session.exec(
+                select(CourseEnrollment).where(
+                    CourseEnrollment.account_id == current_user.id,
+                    CourseEnrollment.course_id == module.section.course_id,
+                )
             )
         ).first()
 
@@ -258,10 +301,12 @@ class StudentService:
         else:
             finished.discard(module_id)
 
-        all_modules = session.exec(
-            select(Module)
-            .join(Section)
-            .where(Section.course_id == module.section.course_id)
+        all_modules = (
+            await session.exec(
+                select(Module)
+                .join(Section)
+                .where(Section.course_id == module.section.course_id)
+            )
         ).all()
 
         total_modules = len(all_modules)

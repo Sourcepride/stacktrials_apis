@@ -10,7 +10,8 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 import httpx
 from fastapi import HTTPException, UploadFile
 from PIL import Image
-from sqlmodel import Session, col, select
+from sqlmodel import col, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import (
     ALLOWED_EXTENSIONS,
@@ -295,9 +296,9 @@ async def list_dropbox_files(access_token: str, extensions: list[str]) -> list[d
 
 
 async def list_active_storage_providers(
-    session: Session, current_user: CurrentActiveUser
+    session: AsyncSession, current_user: CurrentActiveUser
 ):
-    providers = session.exec(
+    providers = await session.exec(
         select(Provider).where(
             col(Provider.refresh_token_encrypted).is_not(None),
             Provider.account_id == current_user.id,
@@ -307,8 +308,8 @@ async def list_active_storage_providers(
     return {"items": providers}
 
 
-async def list_active_providers(session: Session, current_user: CurrentActiveUser):
-    providers = session.exec(
+async def list_active_providers(session: AsyncSession, current_user: CurrentActiveUser):
+    providers = await session.exec(
         select(Provider).where(
             Provider.account_id == current_user.id,
         )

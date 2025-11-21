@@ -1,13 +1,15 @@
 import uuid
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException, WebSocketException
-from sqlmodel import Session, and_, col, desc, func, or_, select
+from sqlmodel import and_, col, desc, func, or_, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE
 from app.common.enum import ChatType, GroupChatPrivacy, MemberRole, MemberStatus
 from app.common.utils import paginate, ws_code_from_http_code
-from app.models.chat_model import Chat, ChatMember, Message, MessageReaction
+from app.models.chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
 from app.models.courses_model import Course, CourseEnrollment
 from app.models.user_model import Account, Profile
 from app.schemas.annotations import ChatMessage
@@ -22,7 +24,9 @@ from app.schemas.chat import (
 
 class ChatService:
     @staticmethod
-    async def get_initial_data(chat_id: str, session: Session, current_user: Account):
+    async def get_initial_data(
+        chat_id: str, session: AsyncSession, current_user: Account
+    ):
         try:
             return await ChatService.list_messages(chat_id, session, current_user)
         except Exception as e:
@@ -37,7 +41,7 @@ class ChatService:
     @staticmethod
     async def list_messages(
         chat_id: str,
-        session: Session,
+        session: AsyncSession,
         current_user: Account,
         last_message_id: Optional[int] = None,
         cursor_type: Optional[str] = None,
@@ -48,13 +52,13 @@ class ChatService:
             Message.chat_id == chat_id, Message.is_deleted == False
         )
 
-        total_messages = session.exec(
-            select(func.count()).select_from(query.froms[0])
+        total_messages = (
+            await session.exec(select(func.count()).select_from(query.froms[0]))
         ).one()
 
         if last_message_id:
-            last_message = session.exec(
-                select(Message).where(Message.id == last_message_id)
+            last_message = (
+                await session.exec(select(Message).where(Message.id == last_message_id))
             ).first()
 
             if last_message and cursor_type == "before":
@@ -63,7 +67,7 @@ class ChatService:
                 query = query.where(Message.created_at > last_message.created_at)
 
         query = query.order_by(desc(Message.created_at)).limit(limit)
-        messages = session.exec(query).all()
+        messages = (await session.exec(query)).all()
 
         return {
             "items": messages,
@@ -74,7 +78,7 @@ class ChatService:
 
     @staticmethod
     async def list_chat(
-        q: str, session: Session, current_user: Account, page=1, per_page=PER_PAGE
+        q: str, session: AsyncSession, current_user: Account, page=1, per_page=PER_PAGE
     ):
         query = (
             select(Chat)
@@ -117,12 +121,30 @@ class ChatService:
 
         query.order_by(desc(Chat.last_message_at))
 
-        return paginate(session, query, page, per_page)
+        res = await paginate(session, query, page, per_page)
+        items = res["items"]
+        ids: list[uuid.UUID] = [item.id for item in items]
+
+        unread_map = await ChatService.fetch_unread_stats(session, ids, current_user.id)
+
+        modified_res = []
+        for item in items:
+            stats = unread_map.get(item.id, {"unread_count": 0, "has_reply": False})
+            modified_res.append(
+                {
+                    "chat": item,
+                    "unread_count": stats["unread_count"],
+                    "has_reply": stats["has_reply"],
+                }
+            )
+        res["items"] = modified_res
+
+        return res
 
     @staticmethod
     async def list_all_public_chat(
         q: str | None,
-        session: Session,
+        session: AsyncSession,
         current_user: Account,
         page=1,
         per_page=PER_PAGE,
@@ -168,15 +190,17 @@ class ChatService:
 
         query.order_by(desc(Chat.last_message_at))
 
-        return paginate(session, query, page, per_page)
+        return await paginate(session, query, page, per_page)
 
     @staticmethod
-    async def create_chat(session: Session, current_user: Account, data: ChatWrite):
+    async def create_chat(
+        session: AsyncSession, current_user: Account, data: ChatWrite
+    ):
         cleaned_data = data.model_dump()
         chat = Chat(**cleaned_data)
         chat.account_id = current_user.id
         session.add(chat)
-        session.flush()
+        await session.flush()
 
         member = ChatMember(
             role=MemberRole.ADMIN,
@@ -189,8 +213,10 @@ class ChatService:
             if not data.associate_account:
                 raise HTTPException(400, "direct chat must have an associate account")
 
-            account = session.exec(
-                select(Account).where(Account.id == data.associate_account)
+            account = (
+                await session.exec(
+                    select(Account).where(Account.id == data.associate_account)
+                )
             ).first()
 
             if not account:
@@ -204,22 +230,25 @@ class ChatService:
             session.add(associate_member)
 
         session.add(member)
-        session.commit()
-        session.refresh(chat)
+        await session.commit()
+        await session.refresh(chat)
 
         return chat
 
     @staticmethod
     async def update_chat(
-        session: Session, current_user: Account, chat_id: str, data: ChatUpdate
+        session: AsyncSession, current_user: Account, chat_id: str, data: ChatUpdate
     ):
         chat = await ChatService.get_chat_or_raise(
             str(chat_id), str(current_user.id), session
         )
 
-        member = session.exec(
-            select(ChatMember).where(
-                ChatMember.account_id == current_user.id, ChatMember.chat_id == chat.id
+        member = (
+            await session.exec(
+                select(ChatMember).where(
+                    ChatMember.account_id == current_user.id,
+                    ChatMember.chat_id == chat.id,
+                )
             )
         ).first()
 
@@ -230,22 +259,25 @@ class ChatService:
 
         chat.sqlmodel_update(data.model_dump())
         session.add(chat)
-        session.commit()
-        session.refresh(chat)
+        await session.commit()
+        await session.refresh(chat)
 
         return chat
 
     @staticmethod
     async def make_admin(
-        session: Session, current_user: Account, chat_id: str, member_id: str
+        session: AsyncSession, current_user: Account, chat_id: str, member_id: str
     ):
         chat = await ChatService.get_chat_or_raise(
             str(chat_id), str(current_user.id), session
         )
 
-        current_member = session.exec(
-            select(ChatMember).where(
-                ChatMember.account_id == current_user.id, ChatMember.chat_id == chat.id
+        current_member = (
+            await session.exec(
+                select(ChatMember).where(
+                    ChatMember.account_id == current_user.id,
+                    ChatMember.chat_id == chat.id,
+                )
             )
         ).first()
 
@@ -254,12 +286,14 @@ class ChatService:
         if current_member.status != MemberRole.ADMIN and not current_member.is_creator:
             raise HTTPException(403, "permission denied")
 
-        member = session.exec(
-            select(ChatMember).where(
-                ChatMember.account_id == member_id,
-                ChatMember.chat_id == chat.id,
-                ChatMember.left_at == None,
-                ChatMember.status == MemberStatus.ACTIVE,
+        member = (
+            await session.exec(
+                select(ChatMember).where(
+                    ChatMember.account_id == member_id,
+                    ChatMember.chat_id == chat.id,
+                    ChatMember.left_at == None,
+                    ChatMember.status == MemberStatus.ACTIVE,
+                )
             )
         ).first()
 
@@ -269,22 +303,25 @@ class ChatService:
         member.role = MemberRole.ADMIN
 
         session.add(member)
-        session.commit()
-        session.refresh(member)
+        await session.commit()
+        await session.refresh(member)
 
         return member
 
     @staticmethod
     async def remove_admin(
-        session: Session, current_user: Account, chat_id: str, member_id: str
+        session: AsyncSession, current_user: Account, chat_id: str, member_id: str
     ):
         chat = await ChatService.get_chat_or_raise(
             str(chat_id), str(current_user.id), session
         )
 
-        current_member = session.exec(
-            select(ChatMember).where(
-                ChatMember.account_id == current_user.id, ChatMember.chat_id == chat.id
+        current_member = (
+            await session.exec(
+                select(ChatMember).where(
+                    ChatMember.account_id == current_user.id,
+                    ChatMember.chat_id == chat.id,
+                )
             )
         ).first()
 
@@ -293,12 +330,14 @@ class ChatService:
         if current_member.status != MemberRole.ADMIN and not current_member.is_creator:
             raise HTTPException(403, "permission denied")
 
-        member = session.exec(
-            select(ChatMember).where(
-                ChatMember.account_id == member_id,
-                ChatMember.chat_id == chat.id,
-                ChatMember.left_at == None,
-                ChatMember.status == MemberStatus.ACTIVE,
+        member = (
+            await session.exec(
+                select(ChatMember).where(
+                    ChatMember.account_id == member_id,
+                    ChatMember.chat_id == chat.id,
+                    ChatMember.left_at == None,
+                    ChatMember.status == MemberStatus.ACTIVE,
+                )
             )
         ).first()
 
@@ -308,14 +347,14 @@ class ChatService:
         member.role = MemberRole.MEMBER
 
         session.add(member)
-        session.commit()
-        session.refresh(member)
+        await session.commit()
+        await session.refresh(member)
 
         return member
 
     @staticmethod
     async def create_message(
-        session: Session, current_user: Account, data: ChatMessageWrite
+        session: AsyncSession, current_user: Account, data: ChatMessageWrite
     ):
         chat = await ChatService.get_chat_or_raise(
             str(data.chat_id), str(current_user.id), session
@@ -324,31 +363,33 @@ class ChatService:
         cleaned_data = data.model_dump()
         message = Message(**cleaned_data, sender_id=current_user.id)
         session.add(message)
-        session.flush()
+        await session.flush()
 
-        session.refresh(chat)
+        await session.refresh(chat)
 
         if message.created_at > chat.last_message_at:
             chat.last_message_at = message.created_at
             session.add(chat)
 
-        session.commit()
+        await session.commit()
 
-        session.refresh(message)
+        await session.refresh(message)
         return message
 
     @staticmethod
     async def update_message(
-        session: Session,
+        session: AsyncSession,
         current_user: Account,
         message_id: str,
         data: ChatMessageUpdate,
     ):
 
-        message = session.exec(
-            select(Message).where(
-                Message.id == message_id,
-                Message.sender_id == current_user.id,
+        message = (
+            await session.exec(
+                select(Message).where(
+                    Message.id == message_id,
+                    Message.sender_id == current_user.id,
+                )
             )
         ).first()
 
@@ -363,17 +404,21 @@ class ChatService:
         message.is_edited = True
 
         session.add(message)
-        session.commit()
+        await session.commit()
 
-        session.refresh(message)
+        await session.refresh(message)
         return message
 
     @staticmethod
-    async def delete_message(session: Session, current_user: Account, message_id: str):
-        message = session.exec(
-            select(Message).where(
-                Message.id == message_id,
-                Message.sender_id == current_user.id,
+    async def delete_message(
+        session: AsyncSession, current_user: Account, message_id: str
+    ):
+        message = (
+            await session.exec(
+                select(Message).where(
+                    Message.id == message_id,
+                    Message.sender_id == current_user.id,
+                )
             )
         ).first()
 
@@ -385,18 +430,84 @@ class ChatService:
 
         message.is_deleted = True
         session.add(message)
-        session.commit()
-        session.refresh(message)
+        await session.commit()
+        await session.refresh(message)
         return message
 
     @staticmethod
-    async def accept_invite():
-        """accept invite
-        check the token and then if the expiry date is none or
-        not expired
-        check if the user is enrolled
-        if the user is enrolled for the course then the user can be added
+    async def accept_invite(session: AsyncSession, current_user: Account, token: str):
         """
+        Accept a chat invite.
+        - decode token → invite_id
+        - validate invite exists + active + within expiry
+        - check membership limit
+        - verify user is invited (if targeted invite)
+        - check if enrolled for course (if group chat is course-based)
+        - add ChatMember
+        """
+
+        invite = (
+            await session.exec(
+                select(ChatInvite).where(ChatInvite.invite_code == token)
+            )
+        ).first()
+        if not invite or not invite.is_active:
+            raise HTTPException(404, "Invite not found or inactive")
+
+        # check expiry
+        if invite.expires_at and invite.expires_at < datetime.now(tz=timezone.utc):
+            raise HTTPException(400, "Invite expired")
+
+        # check max uses
+        if invite.max_uses is not None and invite.current_uses >= invite.max_uses:
+            raise HTTPException(400, "Invite usage limit reached")
+
+        chat = await session.get(Chat, invite.chat_id)
+        if not chat:
+            raise HTTPException(404, "Chat not found")
+
+        # check targeted invite
+        if invite.invited_account_id and invite.invited_account_id != current_user.id:
+            raise HTTPException(403, "This invite is not for you")
+
+        # check if user is already a member
+        existing = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.account_id == current_user.id)
+                .where(ChatMember.chat_id == chat.id)
+            )
+        ).first()
+        if existing:
+            raise HTTPException(400, "Already a member")
+
+        # check course enrollment
+        if chat.course_id:
+            enrollment = (
+                await session.exec(
+                    select(CourseEnrollment)
+                    .where(CourseEnrollment.account_id == current_user.id)
+                    .where(CourseEnrollment.course_id == chat.course_id)
+                )
+            ).first()
+
+            if not enrollment:
+                raise HTTPException(403, "You must be enrolled in the course")
+
+        # create ChatMember
+        new_member = ChatMember(
+            chat_id=chat.id,
+            account_id=current_user.id,
+            role=MemberRole.MEMBER,
+        )
+        session.add(new_member)
+
+        # increment invite usage
+        invite.current_uses += 1
+        await session.commit()
+        await session.refresh(new_member)
+
+        return new_member
 
     @staticmethod
     async def create_invite():
@@ -440,12 +551,14 @@ class ChatService:
 
     @staticmethod
     async def create_delete_reaction(
-        session: Session,
+        session: AsyncSession,
         current_user: Account,
         message_id: str,
         data: ChatMessageReactionWrite,
     ):
-        message = session.exec(select(Message).where(Message.id == message_id)).first()
+        message = (
+            await session.exec(select(Message).where(Message.id == message_id))
+        ).first()
 
         if not message:
             raise HTTPException(404, "message not found")
@@ -454,17 +567,19 @@ class ChatService:
             str(message.chat_id), str(current_user.id), session
         )
 
-        reaction = session.exec(
-            select(MessageReaction).where(
-                MessageReaction.emoji == data.emoji,
-                MessageReaction.account_id == current_user.id,
+        reaction = (
+            await session.exec(
+                select(MessageReaction).where(
+                    MessageReaction.emoji == data.emoji,
+                    MessageReaction.account_id == current_user.id,
+                )
             )
         ).first()
 
         if reaction:
-            session.delete(reaction)
-            session.commit()
-            session.refresh(message)
+            await session.delete(reaction)
+            await session.commit()
+            await session.refresh(message)
             return message
 
         reaction = MessageReaction(**data.model_dump())
@@ -472,18 +587,68 @@ class ChatService:
         reaction.message_id = uuid.UUID(message_id)
 
         session.add(reaction)
-        session.commit()
-        session.refresh(message)
+        await session.commit()
+        await session.refresh(message)
         return message
 
     @staticmethod
+    async def fetch_unread_stats(
+        session, chat_ids: list[uuid.UUID], user_id: uuid.UUID
+    ):
+
+        # Subquery: unread messages grouped by chat
+        unread_subq = (
+            select(
+                col(Message.chat_id).label("chat_id"),
+                func.count(col(Message.id)).label("unread_count"),
+                func.bool_or(col(Message.reply_to_id).isnot(None)).label("has_reply"),
+            )
+            .join(ChatMember, ChatMember.chat_id == Message.chat_id)  # type: ignore
+            .where(
+                ChatMember.account_id == user_id,
+                (
+                    Message.created_at
+                    > select(Message.created_at)
+                    .where(Message.id == ChatMember.last_read_message_id)
+                    .scalar_subquery()
+                    if col(ChatMember.last_read_message_id).isnot(None)
+                    else True
+                ),  # If no last_read, count all messages
+            )
+            .where(col(Message.chat_id).in_(chat_ids))
+            .group_by(col(Message.chat_id))
+            .subquery()
+        )
+
+        results = await session.exec(
+            select(
+                unread_subq.c.chat_id,
+                unread_subq.c.unread_count,
+                unread_subq.c.has_reply,
+            )
+        )
+
+        rows = results.all()
+
+        # Convert into a dict {chat_id: {unread_count, has_reply}}
+        return {
+            row.chat_id: {
+                "unread_count": row.unread_count,
+                "has_reply": row.has_reply,
+            }
+            for row in rows
+        }
+
+    @staticmethod
     async def get_chat_or_raise(
-        chat_id: str, account_id: str, session: Session
+        chat_id: str, account_id: str, session: AsyncSession
     ) -> Chat:
-        chat = session.exec(
-            select(Chat)
-            .join(ChatMember)
-            .where(Chat.id == chat_id, ChatMember.account_id == account_id)
+        chat = (
+            await session.exec(
+                select(Chat)
+                .join(ChatMember)
+                .where(Chat.id == chat_id, ChatMember.account_id == account_id)
+            )
         ).first()
         if not chat:
             raise HTTPException(403, "you are not a member of this chat")
