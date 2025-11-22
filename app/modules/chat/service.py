@@ -8,12 +8,18 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE
 from app.common.enum import ChatType, GroupChatPrivacy, MemberRole, MemberStatus
-from app.common.utils import paginate, ws_code_from_http_code
+from app.common.utils import (
+    CursorPaginationSerializer,
+    generate_base_64_encoded_uuid,
+    paginate,
+    ws_code_from_http_code,
+)
 from app.models.chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
 from app.models.courses_model import Course, CourseEnrollment
 from app.models.user_model import Account, Profile
 from app.schemas.annotations import ChatMessage
 from app.schemas.chat import (
+    ChatInviteWrite,
     ChatMessageReactionWrite,
     ChatMessageUpdate,
     ChatMessageWrite,
@@ -52,9 +58,9 @@ class ChatService:
             Message.chat_id == chat_id, Message.is_deleted == False
         )
 
-        total_messages = (
-            await session.exec(select(func.count()).select_from(query.froms[0]))
-        ).one()
+        # total_messages = (
+        #     await session.exec(select(func.count()).select_from(query.froms[0]))
+        # ).one()
 
         if last_message_id:
             last_message = (
@@ -68,13 +74,18 @@ class ChatService:
 
         query = query.order_by(desc(Message.created_at)).limit(limit)
         messages = (await session.exec(query)).all()
+        last_message = messages[len(messages) - 1]
+        hasNext = bool(
+            (
+                await session.exec(
+                    select(Message).where(Message.created_at < last_message.created_at)
+                )
+            ).first()
+        )  # even if it is one message then there is a valid next
 
-        return {
-            "items": messages,
-            "last_message_id": messages[len(messages) - 1].id,
-            "recent_message_id": messages[0].id,
-            "next": total_messages <= len(messages),
-        }
+        return CursorPaginationSerializer(
+            messages, messages[len(messages) - 1].id, messages[0].id, hasNext
+        )
 
     @staticmethod
     async def list_chat(
@@ -510,13 +521,60 @@ class ChatService:
         return new_member
 
     @staticmethod
-    async def create_invite():
+    async def create_invite(
+        session: AsyncSession, current_user: Account, data: ChatInviteWrite
+    ):
         """
-        here create an invite
-        check if the user account exists
-        if it exists then send out a notification
-        and an email to the user in question
+        Create an invite.
+        - chat must exist
+        - current_user must be a member
+        - if invited_account_id is provided → targeted invite
+        - send notification (placeholder)
         """
+        chat = await session.get(Chat, data.chat_id)
+        if not chat:
+            raise HTTPException(404, "Chat not found")
+
+        # check membership
+        member = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat.id)
+                .where(ChatMember.account_id == current_user.id)
+            )
+        ).first()
+        if not member:
+            raise HTTPException(403, "You must be a member to create invites")
+
+        if member.role != MemberRole.ADMIN and not member.is_creator:
+            raise HTTPException(403, "Permission denied, only admin can invite")
+
+        # optional target
+        target_account = None
+        if data.invited_account_id:
+            target_account = await session.get(Account, data.invited_account_id)
+            if not target_account:
+                raise HTTPException(404, "Invited account not found")
+
+        cleaned_data = data.model_dump()
+
+        invite = ChatInvite(
+            **cleaned_data,
+            invited_by_id=member.id,
+            is_active=True,
+        )
+
+        invite.invite_code = generate_base_64_encoded_uuid()
+
+        session.add(invite)
+        await session.commit()
+        await session.refresh(invite)
+
+        # TODO: send notification + email
+        # NotificationService.send_invite(...)
+        # EmailService.chat_invite(...)
+
+        return invite
 
     @staticmethod
     async def add_directly():

@@ -10,7 +10,7 @@ import redis.asyncio as aioredis
 from fastapi import WebSocket
 from redis import Redis
 
-from app.common.constants import REDIS_URL
+from .constants import REDIS_URL
 
 
 class ConnectionManager:
@@ -39,7 +39,7 @@ class ConnectionManager:
                 await self.disconnect(doc_id, ws)
 
 
-manager = ConnectionManager()
+conn_manager = ConnectionManager()
 
 
 logger = logging.getLogger("redis_pubsub")
@@ -337,3 +337,6 @@ class RedisPubSubManager:
                             logger.warning("Reconnect attempt failed")
             # loop to retry
         logger.info("Exiting listener loop for %s", channel)
+
+
+manager = RedisPubSubManager()

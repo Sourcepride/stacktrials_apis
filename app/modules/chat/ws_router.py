@@ -1,8 +1,7 @@
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
-from app.common.ws_manager import LocalConnection
+from app.common.ws_manager import manager
 from app.core.dependencies import CurrentWSUser, SessionDep
-from app.main import manager
 from app.modules.chat.service import ChatService
 
 router = APIRouter()

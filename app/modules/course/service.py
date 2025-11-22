@@ -265,10 +265,12 @@ class CourseService:
         session: AsyncSession, slug: str, current_user: Account
     ):
         course = await CourseService._get_course_or_404(slug, session, current_user)
-        course_enrollment = await session.exec(
-            select(CourseEnrollment).where(
-                CourseEnrollment.course_id == course.id,
-                CourseEnrollment.account_id == current_user.id,
+        course_enrollment = (
+            await session.exec(
+                select(CourseEnrollment).where(
+                    CourseEnrollment.course_id == course.id,
+                    CourseEnrollment.account_id == current_user.id,
+                )
             )
         ).first()
 
@@ -472,10 +474,12 @@ class CourseService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="module not found"
             )
 
-        course_enrollment = await session.exec(
-            select(CourseEnrollment).where(
-                CourseEnrollment.course_id == module.section.course_id,
-                CourseEnrollment.account_id == current_user.id,
+        course_enrollment = (
+            await session.exec(
+                select(CourseEnrollment).where(
+                    CourseEnrollment.course_id == module.section.course_id,
+                    CourseEnrollment.account_id == current_user.id,
+                )
             )
         ).first()
 
@@ -670,10 +674,12 @@ class CourseService:
     async def get_enrollment(
         course_id: str, session: AsyncSession, curent_user: Account
     ):
-        enrollment = await session.exec(
-            select(CourseEnrollment).where(
-                CourseEnrollment.course_id == course_id,
-                CourseEnrollment.account_id == curent_user.id,
+        enrollment = (
+            await session.exec(
+                select(CourseEnrollment).where(
+                    CourseEnrollment.course_id == course_id,
+                    CourseEnrollment.account_id == curent_user.id,
+                )
             )
         ).first()
 
@@ -684,10 +690,12 @@ class CourseService:
 
     @staticmethod
     async def get_progress(course_id: str, session: AsyncSession, curent_user: Account):
-        progress = await session.exec(
-            select(CourseProgress).where(
-                CourseProgress.course_id == course_id,
-                CourseProgress.account_id == curent_user.id,
+        progress = (
+            await session.exec(
+                select(CourseProgress).where(
+                    CourseProgress.course_id == course_id,
+                    CourseProgress.account_id == curent_user.id,
+                )
             )
         ).first()
 
@@ -730,10 +738,12 @@ class CourseService:
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
             )
 
-        enrollment = await session.exec(
-            select(CourseEnrollment).where(
-                CourseEnrollment.course_id == data.course_id,
-                CourseEnrollment.account_id == current_user.id,
+        enrollment = (
+            await session.exec(
+                select(CourseEnrollment).where(
+                    CourseEnrollment.course_id == data.course_id,
+                    CourseEnrollment.account_id == current_user.id,
+                )
             )
         ).first()
         if not enrollment:
@@ -743,10 +753,12 @@ class CourseService:
             )
 
         # Check if user already rated this course
-        existing_rating = await session.exec(
-            select(Rating).where(
-                Rating.course_id == data.course_id,
-                Rating.account_id == current_user.id,
+        existing_rating = (
+            await session.exec(
+                select(Rating).where(
+                    Rating.course_id == data.course_id,
+                    Rating.account_id == current_user.id,
+                )
             )
         ).first()
 
@@ -925,8 +937,10 @@ class CourseService:
         comment.sqlmodel_update({"message": message})
 
         if comment.is_rating:
-            rating = await session.exec(
-                select(Rating).where(Rating.comment_id == comment.id)
+            rating = (
+                await session.exec(
+                    select(Rating).where(Rating.comment_id == comment.id)
+                )
             ).first()
             if rating:
                 rating.message = message
@@ -958,12 +972,14 @@ class CourseService:
         data = await paginate(session, query, page, per_page)
 
         if current_user:
-            likes = await session.exec(
-                select(CommentLike, Comment.course_id)
-                .join(CommentLike)
-                .where(
-                    Comment.course_id == course_id,
-                    CommentLike.account_id == current_user.id,
+            likes = (
+                await session.exec(
+                    select(CommentLike, Comment.course_id)
+                    .join(CommentLike)
+                    .where(
+                        Comment.course_id == course_id,
+                        CommentLike.account_id == current_user.id,
+                    )
                 )
             ).all()
 
@@ -998,12 +1014,14 @@ class CourseService:
         data = await paginate(session, query, page, per_page)
 
         if current_user:
-            likes = await session.exec(
-                select(CommentLike, Comment)
-                .join(CommentLike)
-                .where(
-                    Comment.reply_to_id == comment_id,
-                    CommentLike.account_id == current_user.id,
+            likes = (
+                await session.exec(
+                    select(CommentLike, Comment)
+                    .join(CommentLike)
+                    .where(
+                        Comment.reply_to_id == comment_id,
+                        CommentLike.account_id == current_user.id,
+                    )
                 )
             ).all()
 
@@ -1031,10 +1049,12 @@ class CourseService:
         if not comment:
             raise HTTPException(404, "comment not found!")
 
-        like = await session.exec(
-            select(CommentLike).where(
-                CommentLike.account_id == current_user.id,
-                CommentLike.comment_id == comment_id,
+        like = (
+            await session.exec(
+                select(CommentLike).where(
+                    CommentLike.account_id == current_user.id,
+                    CommentLike.comment_id == comment_id,
+                )
             )
         ).first()
 
@@ -1073,8 +1093,10 @@ class CourseService:
         user_id: uuid.UUID,
         module_type: ModuleType | None = None,
     ):
-        results = await session.exec(
-            select(Module, Section).join(Section).where(Module.id == module_id)
+        results = (
+            await session.exec(
+                select(Module, Section).join(Section).where(Module.id == module_id)
+            )
         ).first()
 
         if not results:

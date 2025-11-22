@@ -5,10 +5,10 @@ import random
 import re
 import string
 import unicodedata
-from typing import Any, Awaitable, Callable, List, Optional, TypeVar, Union
+import uuid
+from typing import Any, Awaitable, Callable, List, Optional, Sequence, TypeVar, Union
 from urllib.parse import urljoin, urlparse
 
-from cryptography.fernet import Fernet
 from fastapi import HTTPException, WebSocketException
 from sqlalchemy import Select, func
 from sqlmodel import SQLModel, select
@@ -191,3 +191,29 @@ async def websocket_error_wrapper(
         raise WebSocketException(
             ws_code_from_http_code(1011), "An internal server error occurred"
         )
+
+
+def generate_base_64_encoded_uuid() -> str:
+    return base64.urlsafe_b64encode(str(uuid.uuid4()).encode()).decode("utf-8")
+
+
+class CursorPaginationSerializer:
+    def __init__(
+        self,
+        items: Sequence[Any],
+        last_message_id: Any,
+        recent_message_id: Any,
+        hasNext: bool,
+    ) -> None:
+        self.items = items
+        self.last_message_id = last_message_id
+        self.recent_message_id = recent_message_id
+        self.hasNext = hasNext
+
+    def __call__(self) -> dict[str, Any]:
+        return {
+            "items": self.items,
+            "last_message_id": self.last_message_id,
+            "recent_message_id": self.recent_message_id,
+            "hasNext": self.hasNext,
+        }

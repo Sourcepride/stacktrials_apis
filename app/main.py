@@ -4,18 +4,15 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from httpx import Request
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.common.constants import ALLOWED_ORIGINS, IS_DEV, SECRET_KEY
+from app.common.constants import ALLOWED_ORIGINS, SECRET_KEY
 from app.common.utils import safe_json_loads
-from app.common.ws_manager import RedisPubSubManager
+from app.common.ws_manager import manager
 from app.core.exceptions import setup_logger
 from app.modules import chat, creator, management, media, student
 
 from .modules import account, auth, course, media
-
-manager = RedisPubSubManager()
 
 
 @asynccontextmanager

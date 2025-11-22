@@ -34,14 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     netcat-openbsd \
     curl \
- && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/*
 
 ARG USERNAME=www
 ARG UID=1000
 ARG GID=1000
 
-RUN groupadd --system --gid ${GID} appgroup && \
-    useradd --system --create-home --uid ${UID} --gid appgroup ${USERNAME}
+RUN groupadd --system --gid ${GID} www && \
+    useradd --system --create-home --uid ${UID} --gid www ${USERNAME}
 
 
 WORKDIR /app
@@ -54,7 +54,7 @@ COPY . .
 
 RUN chmod a+x wait-for-db.sh
 
-RUN chown -R ${USERNAME}:appgroup /app
+RUN chown -R ${USERNAME}:www /app
 
 USER ${USERNAME}
 
