@@ -16,7 +16,9 @@ from app.common.utils import (
 )
 from app.models.chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
 from app.models.courses_model import Course, CourseEnrollment
+from app.models.notification_model import Notification, NotificationType
 from app.models.user_model import Account, Profile
+from app.modules.notification.service import NotificationService
 from app.schemas.annotations import ChatMessage
 from app.schemas.chat import (
     ChatInviteWrite,
@@ -26,6 +28,7 @@ from app.schemas.chat import (
     ChatUpdate,
     ChatWrite,
 )
+from app.schemas.notification import NotificationWrite
 
 
 class ChatService:
@@ -569,6 +572,12 @@ class ChatService:
         session.add(invite)
         await session.commit()
         await session.refresh(invite)
+
+        await NotificationService.create_notification(
+            session,
+            current_user,
+            NotificationWrite(title="", message="", type=NotificationType.INVITE),
+        )
 
         # TODO: send notification + email
         # NotificationService.send_invite(...)

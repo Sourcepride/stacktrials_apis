@@ -298,10 +298,12 @@ async def list_dropbox_files(access_token: str, extensions: list[str]) -> list[d
 async def list_active_storage_providers(
     session: AsyncSession, current_user: CurrentActiveUser
 ):
-    providers = await session.exec(
-        select(Provider).where(
-            col(Provider.refresh_token_encrypted).is_not(None),
-            Provider.account_id == current_user.id,
+    providers = (
+        await session.exec(
+            select(Provider).where(
+                col(Provider.refresh_token_encrypted).is_not(None),
+                Provider.account_id == current_user.id,
+            )
         )
     ).all()
 
@@ -309,9 +311,11 @@ async def list_active_storage_providers(
 
 
 async def list_active_providers(session: AsyncSession, current_user: CurrentActiveUser):
-    providers = await session.exec(
-        select(Provider).where(
-            Provider.account_id == current_user.id,
+    providers = (
+        await session.exec(
+            select(Provider).where(
+                Provider.account_id == current_user.id,
+            )
         )
     ).all()
 
