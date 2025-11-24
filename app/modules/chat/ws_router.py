@@ -1,8 +1,10 @@
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
+from app.common.utils import websocket_error_wrapper, ws_code_from_http_code
 from app.common.ws_manager import manager
 from app.core.dependencies import CurrentWSUser, SessionDep
 from app.modules.chat.service import ChatService
+from app.schemas.chat import ChatMessageRead, ChatRead
 
 router = APIRouter()
 
@@ -35,20 +37,71 @@ async def connect_to_chat(
             event = raw_data.get("event")
             data = raw_data.get("data")
 
-            if event == "chat.create.message":
-                pass
-            elif event == "chat.update.message":
-                pass
-            elif event == "chat.delete.message":
-                pass
+            if event == "chat.message.create":
+                resp = await websocket_error_wrapper(
+                    ChatService.create_message, session, current_user, data
+                )
+                model = ChatMessageRead.model_validate(resp)
+                await manager.publish(
+                    chat_id,
+                    {"event": "chat.message.create", "data": model.model_dump()},
+                )
+            elif event == "chat.message.update":
+                resp = await websocket_error_wrapper(
+                    ChatService.update_chat, session, current_user, chat_id, data
+                )
+                model = ChatMessageRead.model_validate(resp)
+                await manager.publish(
+                    chat_id,
+                    {"event": "chat.message.update", "data": model.model_dump()},
+                )
+            elif event == "chat.message.delete":
+                if isinstance(data, str):
+                    raise WebSocketException(1002, "data must be a string")
+                resp = await websocket_error_wrapper(
+                    ChatService.delete_message, session, current_user, data
+                )
+                model = ChatMessageRead.model_validate(resp)
+                await manager.publish(
+                    chat_id,
+                    {"event": "chat.message.delete", "data": model.model_dump()},
+                )
             elif event == "chat.update":
-                pass
-            elif event == "chat.create.reaction":
-                pass
-            elif event == "chat.delete.reaction":
-                pass
+                resp = await websocket_error_wrapper(
+                    ChatService.update_chat, session, current_user, chat_id, data
+                )
+                model = ChatRead.model_validate(resp)
+                await manager.publish(
+                    chat_id,
+                    {"event": "chat.update", "data": model.model_dump()},
+                )
+            elif event == "chat.reaction.create" or event == "chat.reaction.delete":
+                message_id = raw_data.get("message_id")
+                if not message_id:
+                    raise WebSocketException(1002, "message_id must be present")
+
+                resp = await websocket_error_wrapper(
+                    ChatService.create_delete_reaction,
+                    session,
+                    current_user,
+                    message_id,
+                    data,
+                )
+                model = ChatMessageRead.model_validate(resp)
+                await manager.publish(
+                    chat_id,
+                    {"event": "chat.message.update", "data": model.model_dump()},
+                )
             elif event == "chat.member.delete":
-                pass
+                if isinstance(data, str):
+                    raise WebSocketException(1002, "data must be a string")
+                resp = await websocket_error_wrapper(
+                    ChatService.remove_member, session, current_user, chat_id, data
+                )
+                await manager.publish(
+                    chat_id,
+                    {"event": "chat.member.delete", "data": model.model_dump()},
+                )
 
     except WebSocketDisconnect:
         await manager.unsubscribe_local(chat_id, local_conn)

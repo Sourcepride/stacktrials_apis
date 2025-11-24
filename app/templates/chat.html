@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Invitation</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+        }
+
+        table {
+            border-spacing: 0;
+            border-collapse: collapse;
+        }
+
+        img {
+            border: 0;
+            display: block;
+        }
+    </style>
+</head>
+
+<body style="margin: 0; padding: 0; font-family: Arial, sans-serif; background-color: #f4f4f4;">
+    <!-- Main Container -->
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color: #f4f4f4; padding: 40px 0;">
+        <tr>
+            <td align="center">
+                <!-- Email Content Wrapper -->
+                <table width="600" cellpadding="0" cellspacing="0" border="0"
+                    style="background-color: #ffffff; border-radius: 12px 12px 0 0; overflow: hidden; max-width: 600px;">
+
+                    <!-- Magenta Header Bar -->
+                    <tr>
+                        <td style="background-color: #d946ef; height: 30px; border-radius: 12px 12px 0 0;">
+                        </td>
+                    </tr>
+
+                    <!-- Logo Section -->
+                    <tr>
+                        <td align="center" style="padding: 30px 20px 20px 20px;">
+
+                            <img src="{{logo_url}}" alt="Logo" width="150" style="width: 50px; height: auto;">
+                        </td>
+                    </tr>
+
+                    <!-- Invitation Message -->
+                    <tr>
+                        <td
+                            style="padding: 20px 40px; text-align: center; color: #333333; font-size: 16px; line-height: 24px;">
+                            <p style="margin: 0 0 10px 0; font-weight: bold; font-size: 18px; color: #1e90ff;">
+                                You're Invited!
+                            </p>
+                            <p style="margin: 0;">
+                                {{name}} has invited you to join {{chat}}. Connect with peers, share knowledge,
+                                and collaborate in this exciting study group designed to help you succeed.
+                            </p>
+                        </td>
+                    </tr>
+
+                    <!-- Call to Action Button -->
+                    <tr>
+                        <td align="center" style="padding: 30px 40px 40px 40px;">
+                            <table cellpadding="0" cellspacing="0" border="0">
+                                <tr>
+                                    <td align="center"
+                                        style="background-color: #1e90ff; border-radius: 6px; box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);">
+                                        <a href="[INVITE_LINK]" target="_blank"
+                                            style="display: inline-block; padding: 10px 24px; color: #fafafa; text-decoration: none; font-size: 14px; font-weight: 500;">
+                                            Accept Invitation
+                                        </a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+
+                    <!-- Footer -->
+                    <tr>
+                        <td
+                            style="background-color: #f9f9f9; padding: 30px 40px; text-align: center; color: #666666; font-size: 13px; line-height: 20px; border-top: 1px solid #e0e0e0;">
+                            <p style="margin: 0 0 10px 0;">
+                                Need help? Visit our <a href="[SUPPORT_LINK]"
+                                    style="color: #d946ef; text-decoration: none;">Support Center</a>
+                            </p>
+                            <p style="margin: 0; color: #999999;">
+                                If you weren't expecting this invitation, please disregard this email.
+                            </p>
+                            <p style="margin: 15px 0 0 0; color: #999999; font-size: 12px;">
+                                © {{year}} Stacktrails. All rights reserved.
+                            </p>
+                        </td>
+                    </tr>
+
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>

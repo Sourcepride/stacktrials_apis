@@ -1,7 +1,7 @@
 import uuid
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from app.models.chat_model import (
     ChatBase,
@@ -22,6 +22,7 @@ class ChatRead(ChatBase):
 
     course: Optional[CourseRead] = None
     account: Optional[AccountRead] = None
+    model_config = ConfigDict(from_attributes=True)  # type: ignore
 
 
 class ChatWrite(ChatBase):
@@ -61,6 +62,12 @@ class ChatMessageRead(MessageBase):
     reply_to: Optional[MessageBase] = None
     # replies: list[MessageBase] = None
     reactions: list[ChatMessageReactionRead] = []
+    model_config = ConfigDict(from_attributes=True)  # type: ignore
+
+
+class ChatMessageReadFromAttrs(ChatMemberRead):
+    class Config:
+        from_attributes = True
 
 
 class ChatAndUnReadCount(BaseModel):

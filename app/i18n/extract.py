@@ -8,9 +8,9 @@ from genericpath import isfile
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 LOCALES_DIR = Path(__file__).resolve().parent / "locales"
 SOURCE_LANG = "en"
-SOURCE_FILE = LOCALES_DIR / SOURCE_LANG / "translation.json"
+SOURCE_FILE = LOCALES_DIR / SOURCE_LANG / "translations.json"
 
-TRANSLATION_KEY_REGEX = re.compile(r"i18n\.t\([\"']([\w\.\-]+)[\"']\)")
+TRANSLATION_KEY_REGEX = re.compile(r"trans\.t\([\"']([\w\.\-]+)[\"']\)")
 
 
 def find_translation_keys():

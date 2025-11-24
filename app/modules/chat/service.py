@@ -2,11 +2,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import HTTPException, WebSocketException
+from fastapi import BackgroundTasks, HTTPException, WebSocketException
 from sqlmodel import and_, col, desc, func, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.common.constants import PER_PAGE
+from app.common.constants import BASE_URL, PER_PAGE
+from app.common.email_utils import send_email
 from app.common.enum import ChatType, GroupChatPrivacy, MemberRole, MemberStatus
 from app.common.utils import (
     CursorPaginationSerializer,
@@ -14,6 +15,7 @@ from app.common.utils import (
     paginate,
     ws_code_from_http_code,
 )
+from app.i18n import translation
 from app.models.chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
 from app.models.courses_model import Course, CourseEnrollment
 from app.models.notification_model import Notification, NotificationType
@@ -23,6 +25,7 @@ from app.schemas.annotations import ChatMessage
 from app.schemas.chat import (
     ChatInviteWrite,
     ChatMessageReactionWrite,
+    ChatMessageRead,
     ChatMessageUpdate,
     ChatMessageWrite,
     ChatUpdate,
@@ -449,6 +452,40 @@ class ChatService:
         return message
 
     @staticmethod
+    async def remove_member(
+        session: AsyncSession, current_user: Account, chat_id: str, member_id: str
+    ):
+
+        chat_member = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat_id)
+                .where(ChatMember.account_id == member_id)
+            )
+        ).first()
+
+        if not chat_member:
+            raise HTTPException(404, "Chat member not found")
+
+        remover = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat_id)
+                .where(ChatMember.account_id == current_user.id)
+            )
+        ).first()
+
+        if not remover:
+            raise HTTPException(403, "You must be a member to create invites")
+
+        if remover.role != MemberRole.ADMIN and not remover.is_creator:
+            raise HTTPException(403, "Permission denied, only admin can invite")
+
+        await session.delete(chat_member)
+        await session.commit()
+        return {"OK": True}
+
+    @staticmethod
     async def accept_invite(session: AsyncSession, current_user: Account, token: str):
         """
         Accept a chat invite.
@@ -525,7 +562,11 @@ class ChatService:
 
     @staticmethod
     async def create_invite(
-        session: AsyncSession, current_user: Account, data: ChatInviteWrite
+        session: AsyncSession,
+        current_user: Account,
+        bgTask: BackgroundTasks,
+        data: ChatInviteWrite,
+        lang: Optional[str] = None,
     ):
         """
         Create an invite.
@@ -552,12 +593,9 @@ class ChatService:
         if member.role != MemberRole.ADMIN and not member.is_creator:
             raise HTTPException(403, "Permission denied, only admin can invite")
 
-        # optional target
-        target_account = None
-        if data.invited_account_id:
-            target_account = await session.get(Account, data.invited_account_id)
-            if not target_account:
-                raise HTTPException(404, "Invited account not found")
+        target_account = await session.get(Account, data.invited_account_id)
+        if not target_account:
+            raise HTTPException(404, "Invited account not found")
 
         cleaned_data = data.model_dump()
 
@@ -573,48 +611,208 @@ class ChatService:
         await session.commit()
         await session.refresh(invite)
 
+        trans = translation(lang)
+
         await NotificationService.create_notification(
             session,
             current_user,
-            NotificationWrite(title="", message="", type=NotificationType.INVITE),
+            NotificationWrite(
+                title=trans.t("chat_invite.title"),
+                message=trans.t(
+                    "chat_invite.message",
+                    inviter=current_user.username,
+                ),
+                type=NotificationType.INVITE,
+            ),
         )
 
-        # TODO: send notification + email
-        # NotificationService.send_invite(...)
-        # EmailService.chat_invite(...)
+        await send_email(
+            bgTask,
+            [target_account.email],
+            "Chat Invitation",
+            "chat.html",
+            {
+                "logo_url": BASE_URL + "/static/black-logo.png",
+                "name": (
+                    current_user.profile.display_name or current_user.username
+                    if current_user.profile
+                    else member.account.username
+                ),
+                "chat": chat.name,
+                "year": datetime.now(timezone.utc).year,
+            },
+        )
 
         return invite
 
     @staticmethod
-    async def add_directly():
+    async def add_directly(
+        session: AsyncSession,
+        current_user: Account,
+        target_account_id: str,
+        course_id: Optional[str] = None,
+    ):
         """
-        users in a group should be able to directly chat group members
-        or privately message coure creator or other learners via comment
-        section
+        Create a direct chat between two members who share a course.
+        Steps:
+        - verify target exists
+        - verify both are enrolled in same course (required)
+        - check if direct chat already exists
+        - create chat + members
+        """
+        # target user exists
+        target = await session.get(Account, target_account_id)
+        if not target:
+            raise HTTPException(404, "Account not found")
 
-        create a direct chat
-        check if account exists and is enrolled in same course
-        create a member afterwards by adding the member to the chat
-        """
+        if target.id == current_user.id:
+            raise HTTPException(400, "You cannot DM yourself")
+
+        # check enrollment
+        if course_id:
+            course = await session.get(Course, course_id)
+            if not course:
+                raise HTTPException(404, "Course not found")
+
+            # user
+            me = (
+                await session.exec(
+                    select(CourseEnrollment)
+                    .where(CourseEnrollment.course_id == course_id)
+                    .where(CourseEnrollment.account_id == current_user.id)
+                )
+            ).first()
+            if not me and not course.account_id != current_user.id:
+                raise HTTPException(403, "You are not enrolled in this course")
+
+            # target
+            other = (
+                await session.exec(
+                    select(CourseEnrollment)
+                    .where(CourseEnrollment.course_id == course_id)
+                    .where(CourseEnrollment.account_id == target.id)
+                )
+            ).first()
+            if not other and not course.account_id != target.id:
+                raise HTTPException(403, "User not enrolled in this course")
+
+        # check if direct chat already exists
+        existing = (
+            await session.exec(
+                select(Chat)
+                .where(Chat.chat_type == ChatType.DIRECT)
+                .where(col(Chat.members).any(ChatMember.account_id == current_user.id))  # type: ignore
+                .where(col(Chat.members).any(ChatMember.account_id == target.id))  # type: ignore
+            )
+        ).first()
+
+        if existing:
+            return existing
+
+        # create direct chat
+        chat = Chat(
+            chat_type=ChatType.DIRECT,
+            account_id=current_user.id,  # creator
+            course_id=course_id,
+        )
+        session.add(chat)
+        await session.flush()
+
+        # add 2 members
+        session.add(ChatMember(chat_id=chat.id, account_id=current_user.id))
+        session.add(ChatMember(chat_id=chat.id, account_id=target.id))
+
+        await session.commit()
+        await session.refresh(chat)
+        return chat
 
     @staticmethod
-    async def join_public_group():
+    async def join_public_group(
+        session: AsyncSession, chat_id: uuid.UUID, current_user: Account
+    ):
         """
-        using the chat_id
-        we check if the chat exists
-        check if user is enrolled in the course if course is available
-        if user is not enrolled in the course then they should get a permission denied
-        else a chat member is created
+        Join a public group chat.
+        - chat exists
+        - must be PUBLIC
+        - if chat has course_id → must be enrolled
+        - if already member → return
         """
+        chat = await session.get(Chat, chat_id)
+        if not chat:
+            raise HTTPException(404, "Chat not found")
+
+        if chat.privacy != GroupChatPrivacy.PUBLIC:
+            raise HTTPException(403, "This group is not public")
+
+        # check if already member
+        existing = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat.id)
+                .where(ChatMember.account_id == current_user.id)
+            )
+        ).first()
+        if existing:
+            return existing
+
+        # check course enrollment
+        if chat.course_id:
+            enrolled = (
+                await session.exec(
+                    select(CourseEnrollment)
+                    .where(CourseEnrollment.course_id == chat.course_id)
+                    .where(CourseEnrollment.account_id == current_user.id)
+                )
+            ).first()
+            if not enrolled:
+                raise HTTPException(403, "You are not enrolled in this course")
+
+        member = ChatMember(
+            chat_id=chat.id,
+            account_id=current_user.id,
+            role=MemberRole.MEMBER,
+        )
+        session.add(member)
+        await session.commit()
+        await session.refresh(member)
+
+        return member
 
     @staticmethod
-    async def set_last_message_read():
+    async def set_last_message_read(
+        session: AsyncSession,
+        chat_id: uuid.UUID,
+        message_id: uuid.UUID,
+        current_user: Account,
+    ):
         """
-        this is used to set the last message read for the chat member
-        checks if the member exists and the current user is the memmber
-        then checks if the message exists for that chat else raises a 404
-        update the last message read id after checks passed
+        Set last read message.
+        - validate user is member
+        - validate message exists and belongs to chat
+        - update ChatMember.last_read_message_id
         """
+        # member check
+        member = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat_id)
+                .where(ChatMember.account_id == current_user.id)
+            )
+        ).first()
+        if not member:
+            raise HTTPException(403, "You are not a member of this chat")
+
+        # message exists & belongs to chat
+        msg = await session.get(Message, message_id)
+        if not msg or msg.chat_id != chat_id:
+            raise HTTPException(404, "Message not found in this chat")
+
+        # update read pointer
+        member.last_read_message_id = msg.id
+
+        session.add(member)
+        await session.commit()
+        return {"ok": True}
 
     @staticmethod
     async def create_delete_reaction(

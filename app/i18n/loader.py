@@ -10,7 +10,7 @@ base_path = Path(__file__).resolve().parent / "locales"
 
 
 @lru_cache(maxsize=None)
-def translation(lang: str) -> Language:
+def translation(lang: str = "") -> Language:
     locale = settings.default_locale
     if lang in settings.supported_locale:
         locale = lang
