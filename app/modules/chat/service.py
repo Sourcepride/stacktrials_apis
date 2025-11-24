@@ -99,7 +99,11 @@ class ChatService:
 
     @staticmethod
     async def list_chat(
-        q: str, session: AsyncSession, current_user: Account, page=1, per_page=PER_PAGE
+        session: AsyncSession,
+        current_user: Account,
+        page=1,
+        per_page=PER_PAGE,
+        q: str | None = None,
     ):
         query = (
             select(Chat)

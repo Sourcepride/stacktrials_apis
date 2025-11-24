@@ -12,7 +12,7 @@ from app.common.ws_manager import manager
 from app.core.exceptions import setup_logger
 from app.modules import chat, creator, management, media, student
 
-from .modules import account, auth, course, media
+from .modules import account, auth, chat, course, media
 
 
 @asynccontextmanager
@@ -91,5 +91,6 @@ app.include_router(
 app.include_router(
     management.router.router, prefix=f"{version_1}/management", tags=["management"]
 )
+app.include_router(chat.router.router, prefix=f"{version_1}/chat", tags=["chat"])
 app.include_router(student.ws_router.router, prefix="/ws/documents")
 app.include_router(chat.ws_router.router, prefix="/ws/chat")

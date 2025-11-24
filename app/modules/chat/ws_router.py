@@ -1,5 +1,8 @@
+from typing import Optional
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
+from app.common.constants import PER_PAGE
 from app.common.utils import websocket_error_wrapper, ws_code_from_http_code
 from app.common.ws_manager import manager
 from app.core.dependencies import CurrentWSUser, SessionDep
@@ -109,6 +112,47 @@ async def connect_to_chat(
         # logger.exception("Exception in websocket handler: %s", exc)
         # ensure cleanup
         await manager.unsubscribe_local(chat_id, local_conn)
+        try:
+            await websocket.close()
+        except Exception:
+            pass
+
+
+@router.websocket("/chat")
+async def connect_chat_histories(
+    websocket: WebSocket,
+    session: SessionDep,
+    current_user: CurrentWSUser,
+    q: Optional[str] = None,
+    page: Optional[int] = None,
+):
+
+    await websocket.accept()
+    initial_data = await ChatService.list_chat(
+        session, current_user, page or 1, PER_PAGE, q
+    )
+    await websocket.send_json({"event": "chat.list", "data": initial_data})
+
+    sub_key = f"personal_chat:{current_user.id}"
+
+    local_conn = await manager.subscribe_local(sub_key, websocket)
+
+    try:
+        while True:
+            try:
+                raw_data = await websocket.receive_json()
+            except Exception:
+                continue
+
+            event = raw_data.get("event")
+            data = raw_data.get("data")
+
+    except WebSocketDisconnect:
+        await manager.unsubscribe_local(sub_key, local_conn)
+    except Exception as exc:
+        # logger.exception("Exception in websocket handler: %s", exc)
+        # ensure cleanup
+        await manager.unsubscribe_local(sub_key, local_conn)
         try:
             await websocket.close()
         except Exception:
