@@ -4,7 +4,7 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 LOCALES_DIR = BASE_DIR / "locales"
 SOURCE_LANG = "en"
-SOURCE_FILE = LOCALES_DIR / SOURCE_LANG / "translation.json"
+SOURCE_FILE = LOCALES_DIR / SOURCE_LANG / "translations.json"
 
 
 def load_json(path: Path):
@@ -59,7 +59,7 @@ def main():
             continue
 
         lang = lang_folder.name
-        target_file = lang_folder / "translation.json"
+        target_file = lang_folder / "translations.json"
 
         if lang == SOURCE_LANG:
             print(f"✓ {lang} is the source locale, skipping.")
