@@ -55,7 +55,8 @@ class ChatService:
         chat_id: str,
         session: AsyncSession,
         current_user: Account,
-        last_message_id: Optional[int] = None,
+        q: Optional[str] = None,
+        last_message_id: Optional[str] = None,
         cursor_type: Optional[str] = None,
         limit: int = PER_PAGE,
     ):
@@ -77,6 +78,9 @@ class ChatService:
                 query = query.where(Message.created_at < last_message.created_at)
             elif last_message and cursor_type == "after":
                 query = query.where(Message.created_at > last_message.created_at)
+
+        if q:
+            query = query.where(col(Message.content).ilike(f"%{q}%"))
 
         query = query.order_by(desc(Message.created_at)).limit(limit)
         messages = (await session.exec(query)).all()
