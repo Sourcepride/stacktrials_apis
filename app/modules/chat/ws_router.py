@@ -1,13 +1,20 @@
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
 
 from app.common.constants import PER_PAGE
-from app.common.utils import websocket_error_wrapper, ws_code_from_http_code
+from app.common.utils import (
+    chat_history_ws_channel,
+    websocket_error_wrapper,
+    ws_code_from_http_code,
+)
 from app.common.ws_manager import manager
 from app.core.dependencies import CurrentWSUser, SessionDep
 from app.modules.chat.service import ChatService
 from app.schemas.chat import ChatMessageRead, ChatRead
+
+if TYPE_CHECKING:
+    from app.common.ws_manager import LocalConnection
 
 router = APIRouter()
 
@@ -106,6 +113,8 @@ async def connect_to_chat(
                     {"event": "chat.member.delete", "data": model.model_dump()},
                 )
 
+            await manager.publish({"event":"chat.stat", "data":   })
+
     except WebSocketDisconnect:
         await manager.unsubscribe_local(chat_id, local_conn)
     except Exception as exc:
@@ -133,9 +142,10 @@ async def connect_chat_histories(
     )
     await websocket.send_json({"event": "chat.list", "data": initial_data})
 
-    sub_key = f"personal_chat:{current_user.id}"
-
+    sub_key = chat_history_ws_channel(current_user)
+    conns: dict[str, LocalConnection] = {}
     local_conn = await manager.subscribe_local(sub_key, websocket)
+    conns[sub_key] = local_conn
 
     try:
         while True:
@@ -147,12 +157,23 @@ async def connect_chat_histories(
             event = raw_data.get("event")
             data = raw_data.get("data")
 
+            if event == "chat.subscribe":
+                if not isinstance(data, str):
+                    raise WebSocketException(1002, "data must be a chat_id in string")
+                con = await manager.subscribe_local(data, websocket)
+                conns[data] = con
+            elif event == "chat.unsubscribe":
+                if not isinstance(data, str):
+                    raise WebSocketException(1002, "data must be a chat_id in string")
+                await manager.unsubscribe_local(data, conns[data])
+
     except WebSocketDisconnect:
         await manager.unsubscribe_local(sub_key, local_conn)
     except Exception as exc:
         # logger.exception("Exception in websocket handler: %s", exc)
         # ensure cleanup
-        await manager.unsubscribe_local(sub_key, local_conn)
+        for key_, con in conns.items():
+            await manager.unsubscribe_local(key_, con)
         try:
             await websocket.close()
         except Exception:

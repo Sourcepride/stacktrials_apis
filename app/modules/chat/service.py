@@ -865,6 +865,46 @@ class ChatService:
         return message
 
     @staticmethod
+    async def fetch_unread_stats_per_chat(
+        session: AsyncSession, chat_id: str, user_id: uuid.UUID
+    ):
+
+        # Fetch the ChatMember row for last_read_message_id
+        chat_member = await session.exec(
+            select(ChatMember).where(
+                ChatMember.chat_id == chat_id, ChatMember.account_id == user_id
+            )
+        )
+        chat_member = chat_member.first()
+
+        # Subquery for last read timestamp
+        if chat_member and chat_member.last_read_message_id:
+            last_read_ts_subq = (
+                select(Message.created_at)
+                .where(Message.id == chat_member.last_read_message_id)
+                .scalar_subquery()
+            )
+            last_read_filter = Message.created_at > last_read_ts_subq
+        else:
+            # No last_read → count all messages
+            last_read_filter = True
+
+        # Query unread stats for this single chat
+        result = await session.exec(
+            select(
+                func.count(col(Message.id)).label("unread_count"),
+                func.bool_or(col(Message.reply_to_id).isnot(None)).label("has_reply"),
+            ).where(Message.chat_id == chat_id, last_read_filter)
+        )
+
+        row = result.one()
+
+        return {
+            "unread_count": row.unread_count,
+            "has_reply": row.has_reply,
+        }
+
+    @staticmethod
     async def fetch_unread_stats(
         session, chat_ids: list[uuid.UUID], user_id: uuid.UUID
     ):
