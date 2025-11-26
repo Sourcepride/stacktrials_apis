@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -18,8 +19,10 @@ class AppSQLModel(SQLModel):
 class AppBaseModelMixin(AppSQLModel):
     created_at: datetime = Field(
         default_factory=lambda: datetime.now(tz=timezone.utc),
+        sa_type=DateTime(timezone=True),
     )
     updated_at: datetime = Field(
         default_factory=lambda: datetime.now(tz=timezone.utc),
+        sa_type=DateTime(timezone=True),
         sa_column_kwargs={"onupdate": lambda: datetime.now(tz=timezone.utc)},
     )

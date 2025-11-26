@@ -73,7 +73,7 @@ async def paginate(
 
     # Get paginated items
     paginated_query = query.offset(offset).limit(per_page)
-    items: List[T] = session.exec(paginated_query).all()  # type: ignore
+    items: List[T] = (await session.exec(paginated_query)).all()  # type: ignore
 
     # Get total count
     try:
@@ -91,7 +91,7 @@ async def paginate(
         try:
             # Remove offset/limit and count
             base_query = query.offset(None).limit(None)
-            total = len(session.exec(base_query).all())  # type: ignore
+            total = len((await session.exec(base_query)).all())  # type: ignore
         except Exception:
             # Final fallback: use length of current items
             total = len(items)

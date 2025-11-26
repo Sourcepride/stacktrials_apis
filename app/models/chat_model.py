@@ -183,6 +183,9 @@ class Message(AppBaseModelMixin, MessageBase, table=True):
     )
     replies: list["Message"] = Relationship(
         back_populates="reply_to",
+        sa_relationship_kwargs={
+            "overlaps": "reply_to",
+        },
     )
     reactions: list["MessageReaction"] = Relationship(
         back_populates="message", cascade_delete=True

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional, cast
 
 from sqlalchemy import BinaryExpression
-from sqlmodel import Session, desc, select, update
+from sqlmodel import desc, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE

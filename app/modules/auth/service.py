@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
 from google.oauth2 import id_token
 from redis.asyncio import Redis
-from sqlmodel import Session, select
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import (
@@ -46,19 +46,24 @@ async def google_one_tap(
     background_tasks: BackgroundTasks,
     redirect: str | None = None,
 ):
-    userinfo = verify_google_auth_token(id_token)
-    email = userinfo["email"]
-    sub = userinfo["sub"]
+    try:
+        userinfo = verify_google_auth_token(id_token)
+        email = userinfo["email"]
+        sub = userinfo["sub"]
 
-    return await authorize_or_register(
-        session,
-        email,
-        Providers.GOOGLE,
-        sub,
-        background_tasks,
-        "openid email profile",
-        {"redirect": redirect or "/en"},
-    )
+        print("------------", sub, email, userinfo)
+
+        return await authorize_or_register(
+            session,
+            email,
+            Providers.GOOGLE,
+            sub,
+            background_tasks,
+            "openid email profile",
+            {"redirect": redirect or "/en"},
+        )
+    except Exception as e:
+        print("=======================", e)
 
 
 async def google_callback_handler(

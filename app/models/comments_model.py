@@ -80,11 +80,19 @@ class Comment(AppBaseModelMixin, CommentBase, table=True):
         sa_relationship_kwargs={"foreign_keys": "[Comment.mention_id]"},
     )
     course: "Course" = Relationship(back_populates="comments")
+
     reply_to: Optional["Comment"] = Relationship(
-        sa_relationship_kwargs={"remote_side": "Comment.id"}
+        back_populates="replies",
+        sa_relationship_kwargs={
+            "remote_side": "Comment.id",
+        },
     )
+
     replies: list["Comment"] = Relationship(
-        sa_relationship_kwargs={"remote_side": "Comment.reply_to_id"}
+        back_populates="reply_to",
+        sa_relationship_kwargs={
+            "overlaps": "reply_to",
+        },
     )
 
     rating: Optional["Rating"] = Relationship(
