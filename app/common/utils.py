@@ -221,3 +221,7 @@ class CursorPaginationSerializer:
 
 def chat_history_ws_channel(current_user: Account):
     return f"personal_chat:{current_user.id}"
+
+
+def notification_ws_channel(current_user: Account):
+    return f"notification:{current_user.id}"

@@ -7,7 +7,8 @@ from sqlmodel import Session, desc, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE
-from app.common.utils import CursorPaginationSerializer
+from app.common.utils import CursorPaginationSerializer, notification_ws_channel
+from app.common.ws_manager import manager
 from app.models.notification_model import Notification
 from app.models.user_model import Account
 from app.schemas.notification import NotificationWrite
@@ -26,6 +27,11 @@ class NotificationService:
         session.add(notification)
         await session.commit()
         await session.refresh(notification)
+        key = notification_ws_channel(current_user)
+        await manager.publish(
+            key,
+            {"event": "notification.create", "data": notification.model_dump_json()},
+        )
 
         return notification
 
@@ -33,7 +39,7 @@ class NotificationService:
     async def list_notifications(
         session: AsyncSession,
         current_user: Account,
-        last_message_id: Optional[int] = None,
+        last_message_id: Optional[str] = None,
         cursor_type: Optional[str] = None,
         limit: int = PER_PAGE,
     ):
@@ -72,7 +78,7 @@ class NotificationService:
 
     @staticmethod
     async def mark_read(
-        session: AsyncSession, notification_id: uuid.UUID, account_id: uuid.UUID
+        session: AsyncSession, notification_id: str, account_id: uuid.UUID
     ):
         notification = await session.get(Notification, notification_id)
         if not notification or notification.account_id != account_id:
@@ -86,7 +92,7 @@ class NotificationService:
         return notification
 
     @staticmethod
-    async def mark_all_read(session: Session, current_user: Account):
+    async def mark_all_read(session: AsyncSession, current_user: Account):
         now = datetime.now(tz=timezone.utc)
 
         stmt = (
@@ -102,7 +108,7 @@ class NotificationService:
             )
         )
 
-        result = session.exec(stmt)
-        session.commit()
+        result = await session.exec(stmt)
+        await session.commit()
 
         return result.rowcount or 0

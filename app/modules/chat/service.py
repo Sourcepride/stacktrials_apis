@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import BackgroundTasks, HTTPException, WebSocketException
 from sqlmodel import and_, col, desc, func, or_, select
@@ -865,43 +865,50 @@ class ChatService:
         return message
 
     @staticmethod
-    async def fetch_unread_stats_per_chat(
+    async def fetch_one_unread_stats(
         session: AsyncSession, chat_id: str, user_id: uuid.UUID
     ):
+        """
+        Return unread_count + has_reply for a single chat_id
+        """
 
-        # Fetch the ChatMember row for last_read_message_id
-        chat_member = await session.exec(
-            select(ChatMember).where(
-                ChatMember.chat_id == chat_id, ChatMember.account_id == user_id
-            )
+        # Get the last_read timestamp subquery
+        last_read_ts_subq = (
+            select(Message.created_at)
+            .where(Message.id == ChatMember.last_read_message_id)
+            .scalar_subquery()
         )
-        chat_member = chat_member.first()
 
-        # Subquery for last read timestamp
-        if chat_member and chat_member.last_read_message_id:
-            last_read_ts_subq = (
-                select(Message.created_at)
-                .where(Message.id == chat_member.last_read_message_id)
-                .scalar_subquery()
-            )
-            last_read_filter = Message.created_at > last_read_ts_subq
-        else:
-            # No last_read → count all messages
-            last_read_filter = True
-
-        # Query unread stats for this single chat
-        result = await session.exec(
+        unread_subq = (
             select(
                 func.count(col(Message.id)).label("unread_count"),
                 func.bool_or(col(Message.reply_to_id).isnot(None)).label("has_reply"),
-            ).where(Message.chat_id == chat_id, last_read_filter)
+            )
+            .select_from(Message)
+            .join(ChatMember, ChatMember.chat_id == Message.chat_id)  # type: ignore
+            .where(
+                ChatMember.account_id == user_id,
+                Message.chat_id == chat_id,
+                # If last_read_message_id is NULL → count all
+                or_(
+                    col(ChatMember.last_read_message_id).is_(None),
+                    Message.created_at > last_read_ts_subq,
+                ),
+            )
+            .subquery()
         )
 
-        row = result.one()
+        result = await session.exec(
+            select(
+                unread_subq.c.unread_count,
+                unread_subq.c.has_reply,
+            )
+        )
+        row: Any = result.one_or_none()
 
         return {
-            "unread_count": row.unread_count,
-            "has_reply": row.has_reply,
+            "unread_count": row.unread_count if row else 0,
+            "has_reply": row.has_reply if row else False,
         }
 
     @staticmethod

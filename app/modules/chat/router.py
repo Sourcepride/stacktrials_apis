@@ -6,7 +6,6 @@ from fastapi import APIRouter, BackgroundTasks, Body, Query
 from app.common.utils import chat_history_ws_channel
 from app.common.ws_manager import manager
 from app.core.dependencies import CurrentActiveUser, SessionDep
-from app.models.chat_model import Chat
 from app.modules.chat.service import ChatService
 from app.schemas.chat import ChatInviteWrite, ChatWrite
 
@@ -22,7 +21,7 @@ async def create_chat(
 
     resp = await ChatService.create_chat(session, current_user, data)
     sub_key = chat_history_ws_channel(current_user)
-    await manager.publish(sub_key, {"type": "chat.create", "data": resp})
+    await manager.publish(sub_key, {"event": "chat.create", "data": resp.model_dump()})
     return resp
 
 
@@ -49,7 +48,7 @@ async def accept_invite(
 ):
     resp = await ChatService.accept_invite(session, current_user, token)
     sub_key = chat_history_ws_channel(current_user)
-    await manager.publish(sub_key, {"type": "chat.accept", "data": resp})
+    await manager.publish(sub_key, {"event": "chat.accept", "data": resp.model_dump()})
     return resp
 
 
@@ -61,7 +60,9 @@ async def join_public_chat(
         session, uuid.UUID(chat_id), current_user
     )
     sub_key = chat_history_ws_channel(current_user)
-    await manager.publish(sub_key, {"type": "chat.join_public", "data": resp})
+    await manager.publish(
+        sub_key, {"event": "chat.join_public", "data": resp.model_dump()}
+    )
     return resp
 
 
@@ -109,5 +110,7 @@ async def add_directly(
 ):
     resp = await ChatService.add_directly(session, current_user, user_id, course_id)
     sub_key = chat_history_ws_channel(current_user)
-    await manager.publish(sub_key, {"type": "chat.direct.add", "data": resp})
+    await manager.publish(
+        sub_key, {"event": "chat.direct.add", "data": resp.model_dump()}
+    )
     return resp
