@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -17,9 +18,15 @@ from .modules import account, auth, chat, course, media
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app_logger = logging.getLogger("app")
     try:
+        app_logger.info("Starting lifespan setup...")
         await manager.connect()
+        app_logger.info("Lifespan setup completed.")
         yield
+    except Exception as e:
+        app_logger.exception(f"Lifespan error: {e}")
+        raise
     finally:
         await manager.close()
 

@@ -42,6 +42,11 @@ def setup_logger():
 
     except Exception as e:
         # Fallback basic logger
+        print("\n================ LOGGING SETUP ERROR ================\n")
+        print(f"Error while loading logging.json: {e}\n")
+        print("Falling back to basic console logger...\n")
+        print("=====================================================\n")
+
         fallback = logging.getLogger("app")
         fallback.setLevel(logging.INFO)
 
