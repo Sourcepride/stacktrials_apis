@@ -9,35 +9,48 @@ from pathlib import Path
 def expand_env(obj):
     if isinstance(obj, dict):
         return {k: expand_env(v) for k, v in obj.items()}
+
     elif isinstance(obj, list):
         return [expand_env(i) for i in obj]
+
     elif isinstance(obj, str) and obj.startswith("${") and obj.endswith("}"):
-        var_expr = obj[2:-1]  # Remove ${ and }
+        expr = obj[2:-1]
+
         # Support default values: ${VAR:DEFAULT}
-        if ":" in var_expr:
-            var_name, default_value = var_expr.split(":", 1)
-            return os.getenv(var_name, default_value)
-        else:
-            return os.getenv(var_expr)
-    else:
-        return obj
+        if ":" in expr:
+            name, default = expr.split(":", 1)
+            return os.getenv(name, default)
+
+        # No default → safe fallback is empty string (so app doesn't crash)
+        return os.getenv(expr, "")
+
+    return obj
 
 
 def setup_logger():
-    logging_file_path = (
-        Path(__file__).resolve().parent.parent.parent.joinpath("logging.json")
-    )
+    try:
+        config_path = Path(__file__).resolve().parent.parent.parent / "logging.json"
+        with open(config_path) as f:
+            raw = json.load(f)
 
-    with open(logging_file_path) as f:
-        conf = json.loads(f.read())
+        config = expand_env(raw)
 
-    logging.config.dictConfig(expand_env(conf))
-    app_logger = logging.getLogger("app")
+        # Safe configure: never crash app on logging config error
+        logging.config.dictConfig(config)
 
-    # console_logger = logging.StreamHandler(sys.stdout)
-    # console_logger.setLevel(logging.INFO)
+        return logging.getLogger("app")
 
-    # app_logger.addHandler(console_logger)
+    except Exception as e:
+        # Fallback basic logger
+        fallback = logging.getLogger("app")
+        fallback.setLevel(logging.INFO)
 
-    # app_logger.propagate = False
-    return app_logger
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.INFO)
+        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+        handler.setFormatter(formatter)
+
+        fallback.addHandler(handler)
+        fallback.error(f"Failed to load logging config. Using fallback. Error: {e}")
+
+        return fallback
