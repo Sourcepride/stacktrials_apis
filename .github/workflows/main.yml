@@ -41,24 +41,24 @@ jobs:
             git merge --ff-only origin/main || git reset --hard origin/main
             
             echo "🗑️  Tearing down existing containers..."
-            docker compose -f docker compose.prod.yml down || true
+            docker compose -f docker docker-compose.prod.yml down || true
             
             echo "🔨 Rebuilding images..."
-            docker compose -f docker compose.prod.yml build --no-cache
+            docker compose -f docker docker-compose.prod.yml build --no-cache
             
             echo "📊 Running database migrations..."
             # Run migrations using a temporary container that can access host database
             # The database is on host.docker.internal, docker compose run will inherit extra_hosts from service config
-            docker compose -f docker compose.prod.yml run --rm api alembic upgrade head
+            docker compose -f docker docker-compose.prod.yml run --rm api alembic upgrade head
             
             echo "🚀 Starting containers..."
-            docker compose -f docker compose.prod.yml up -d
+            docker compose -f docker docker-compose.prod.yml up -d
             
             echo "⏳ Waiting for services to be healthy..."
             sleep 10
             
             echo "📋 Checking container status..."
-            docker compose -f docker compose.prod.yml ps
+            docker compose -f docker docker-compose.prod.yml ps
             
             echo "✅ Deployment complete!"
 
