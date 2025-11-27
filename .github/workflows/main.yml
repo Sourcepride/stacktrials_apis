@@ -46,7 +46,7 @@ jobs:
             docker compose -f docker-compose.prod.yml down || true
             
             echo "🔨 Rebuilding images..."
-            docker compose -f docker-compose.prod.yml build --no-cache
+            docker compose -f docker-compose.prod.yml build
             
             echo "📊 Running database migrations..."
             docker compose -f docker-compose.prod.yml run --rm api alembic upgrade head
