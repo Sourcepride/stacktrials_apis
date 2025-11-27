@@ -20,7 +20,7 @@ services:
     command: >
       sh -c "
       ./wait-for-db.sh host.docker.internal:5432 --
-      gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8082 --forwarded-allow-ips='*'
+      gunicorn app.main:app -k uvicorn.workers.UvicornWorker -w 2 -b 0.0.0.0:8082 --forwarded-allow-ips='*' --log-level debug
       "
     ports:
       - "8082:8082"  # expose only if needed (e.g., via Nginx)
