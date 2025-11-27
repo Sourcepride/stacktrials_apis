@@ -17,7 +17,7 @@ async def my_account(session: AsyncSession, current_user: Account):
             .options(selectinload(Account.profile))
         )
     ).first()
-    
+
     if not account:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found")
 
