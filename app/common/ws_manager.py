@@ -10,7 +10,7 @@ import redis.asyncio as aioredis
 from fastapi import WebSocket
 from redis import Redis
 
-from .constants import REDIS_URL
+from .redis_client import get_redis
 
 
 class ConnectionManager:
@@ -83,7 +83,6 @@ class RedisPubSubManager:
         redis_kwargs: Optional[dict[str, Any]] = None,
         max_queue_size: int = 1000,
     ):
-        self._redis_url = REDIS_URL
         self._redis_kwargs = redis_kwargs or {}
         self._redis: Optional[aioredis.Redis] = None
 
@@ -106,20 +105,7 @@ class RedisPubSubManager:
         """Create Redis connection"""
         if self._redis:
             return
-        self._redis = aioredis.from_url(
-            self._redis_url, decode_responses=True, **self._redis_kwargs
-        )
-        # test connection
-        try:
-
-            res = self._redis.ping()
-            if inspect.isawaitable(res):
-                await res
-
-            logger.info("Connected to Redis")
-        except Exception as e:
-            logger.exception("Failed to connect to Redis: %s", e)
-            raise
+        self._redis = get_redis(decode_responses=True, **self._redis_kwargs)
 
     async def close(self):
         """Graceful shutdown: cancel listeners and close redis"""
