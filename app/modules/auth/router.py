@@ -283,10 +283,12 @@ async def verify_google_scopes(
     """
     required_scopes = set(scopes.split(","))
 
-    google_provider = session.exec(
-        select(Provider).where(
-            Provider.provider == Providers.GOOGLE,
-            Provider.account_id == current_user.id,
+    google_provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.provider == Providers.GOOGLE,
+                Provider.account_id == current_user.id,
+            )
         )
     ).first()
 

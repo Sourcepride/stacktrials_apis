@@ -28,5 +28,6 @@ services:
     # Optional: speed up pip installs by caching
     environment:
       - PIP_CACHE_DIR=/tmp/pipcache
+      - LOG_LEVEL=DEBUG
 
     restart: "no"

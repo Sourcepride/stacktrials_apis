@@ -14,7 +14,7 @@
             "class": "logging.StreamHandler",
             "formatter": "json",
             "stream": "ext://sys.stdout",
-            "level": "INFO"
+            "level": "${LOG_LEVEL:INFO}"
         },
         "mail": {
             "class": "logging.handlers.SMTPHandler",
@@ -37,7 +37,7 @@
         }
     },
     "root": {
-        "level": "INFO",
+        "level": "${LOG_LEVEL:INFO}",
         "handlers": [
             "console"
         ]

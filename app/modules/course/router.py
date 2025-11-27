@@ -65,7 +65,7 @@ async def list_courses(
 
 @router.get("/tags", response_model=list[TagRead])
 async def list_tags(session: SessionDep):
-    tags = session.exec(select(Tag).order_by(desc(Tag.usage_count))).all()
+    tags = (await session.exec(select(Tag).order_by(desc(Tag.usage_count)))).all()
     return tags
 
 
@@ -117,7 +117,9 @@ async def create_course(
     session: SessionDep,
     current_user: CurrentActiveUser,
 ):
-    return await CourseService.create_course(session, data, current_user)
+    response = await CourseService.create_course(session, data, current_user)
+    print(response)
+    return response
 
 
 @router.post("/section", response_model=SectionContentReadFull, status_code=201)

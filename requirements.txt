@@ -8,6 +8,7 @@ websockets==15.0.1
 # --- Database & async drivers ---
 psycopg2-binary==2.9.10
 redis
+asyncpg==0.30.0
 
 # --- Email & templating ---
 fastapi-mail==1.5.6 
@@ -32,6 +33,7 @@ google-api-python-client==2.179.0
 python-dotenv==1.1.1
 gunicorn==23.0.0
 pillow==12.0.0
+babel==2.17.0
 
 # --- Optional developer tools ---
 watchfiles==1.1.0

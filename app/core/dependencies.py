@@ -14,18 +14,28 @@ from fastapi import (
 )
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
-from sqlmodel import Session
+from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..models.user_model import Account
-from .database import create_app_db_engine, redis_client
+from .database import create_async__db_engine, create_sync_engine, redis_client
 from .security import decode_token
 
-engine = create_app_db_engine()
+sync_engine = create_sync_engine()
+async_engine = create_async__db_engine()
 http_bearer = HTTPBearer(auto_error=False)
 
+async_session = async_sessionmaker(
+    bind=async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False,
+)
 
-def get_session():
-    with Session(engine) as session:
+
+async def get_session():
+    async with async_session() as session:
         yield session
 
 
@@ -37,7 +47,7 @@ async def get_redis() -> AsyncGenerator:
         pass
 
 
-SessionDep = Annotated[Session, Depends(get_session)]
+SessionDep = Annotated[AsyncSession, Depends(get_session)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
 
 
@@ -58,7 +68,7 @@ def get_token_from_request(
     return ""
 
 
-def get_current_user(
+async def get_current_user(
     credentials: Annotated[str, Depends(get_token_from_request)],
     session: SessionDep,
 ):
@@ -76,7 +86,13 @@ def get_current_user(
     if not user_id:
         raise exception
 
-    user = session.get(Account, user_id)
+    user = (
+        await session.exec(
+            select(Account)
+            .where(Account.id == user_id)
+            .options(selectinload(Account.profile))
+        )
+    ).first()
 
     if not user:
         raise exception
@@ -84,7 +100,7 @@ def get_current_user(
     return user
 
 
-def get_current_user_silent(
+async def get_current_user_silent(
     credentials: Annotated[Optional[str], Depends(get_token_from_request)],
     session: SessionDep,
 ):
@@ -97,7 +113,13 @@ def get_current_user_silent(
     if not user_id:
         return
 
-    user = session.get(Account, user_id)
+    user = (
+        await session.exec(
+            select(Account)
+            .where(Account.id == user_id)
+            .options(selectinload(Account.profile))
+        )
+    ).first()
 
     if not user:
         return
@@ -122,7 +144,6 @@ async def get_current_user_ws(
     session: SessionDep,
     token: Annotated[str | None, Query()] = None,
 ):
-    print("=============================")
     exception = WebSocketException(code=status.WS_1008_POLICY_VIOLATION)
     token = websocket.cookies.get("access_token") or token
     if not token:
@@ -134,7 +155,13 @@ async def get_current_user_ws(
     if not user_id:
         raise exception
 
-    user = session.get(Account, user_id)
+    user = (
+        await session.exec(
+            select(Account)
+            .where(Account.id == user_id)
+            .options(selectinload(Account.profile))
+        )
+    ).first()
 
     if not user:
         raise exception

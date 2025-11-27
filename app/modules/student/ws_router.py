@@ -2,12 +2,11 @@ import asyncio
 import json
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
-from sqlmodel import Session
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.common.redis_client import get_redis
-from app.common.ws_manager import manager
-from app.core.dependencies import CurrentActiveUser, CurrentWSUser, SessionDep
+from app.common.ws_manager import conn_manager as manager
+from app.core.dependencies import CurrentWSUser, SessionDep
 from app.models.annotation_model import DocumentAnnotation
 
 router = APIRouter()
@@ -17,7 +16,7 @@ def doc_channel(doc_id: str):
     return f"document:{doc_id}:annotations"
 
 
-@router.websocket("/ws/documents/{doc_id}/annotations")
+@router.websocket("/{doc_id}/annotations")
 async def annotation_ws(
     websocket: WebSocket,
     doc_id: str,
@@ -68,8 +67,8 @@ async def annotation_ws(
                 ann.account_id = current_user.id
                 ann.document_id = UUID(doc_id)
                 session.add(ann)
-                session.commit()
-                session.refresh(ann)
+                await session.commit()
+                await session.refresh(ann)
 
                 payload = {
                     "event": "annotation.created",
@@ -88,11 +87,11 @@ async def annotation_ws(
 
             elif event == "annotation.delete":
                 ann_id = data.get("id")
-                ann = session.get(DocumentAnnotation, ann_id)
+                ann = await session.get(DocumentAnnotation, ann_id)
 
                 if ann:
-                    session.delete(ann)
-                    session.commit()
+                    await session.delete(ann)
+                    await session.commit()
                     payload = {
                         "event": "annotation.deleted",
                         "data": {"id": ann_id, "type": ann.type},
@@ -107,7 +106,7 @@ async def annotation_ws(
                     "type",
                 }
                 ann_id = data.get("id")
-                ann = session.get(DocumentAnnotation, ann_id)
+                ann = await session.get(DocumentAnnotation, ann_id)
 
                 if ann:
                     for k, v in data.items():
@@ -117,8 +116,8 @@ async def annotation_ws(
                             print(f"[Warning] Skipping non-updatable attribute: {k}")
 
                     session.add(ann)
-                    session.commit()
-                    session.refresh(ann)
+                    await session.commit()
+                    await session.refresh(ann)
                     payload = {
                         "event": "annotation.updated",
                         "data": {

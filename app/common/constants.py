@@ -1,4 +1,5 @@
 import os
+from enum import Enum
 
 from dotenv import load_dotenv
 
@@ -6,6 +7,7 @@ load_dotenv()
 
 
 DATABASE_URI = f"postgresql://{os.getenv("DB_USER")}:{os.getenv("DB_PASSWORD")}@{os.getenv("DB_HOST")}:{os.getenv("DB_PORT")}/{os.getenv("DB_NAME")}"
+ASYNC_SUPPORT_DB_URI = f"postgresql+asyncpg://{os.getenv("DB_USER")}:{os.getenv("DB_PASSWORD")}@{os.getenv("DB_HOST")}:{os.getenv("DB_PORT")}/{os.getenv("DB_NAME")}"
 SECRET_KEY = os.getenv("SECRET_KEY")
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS")
 ALLOWED_IMAGE_ORIGIN = os.getenv("ALLOWED_IMAGE_ORIGIN")

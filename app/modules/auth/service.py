@@ -1,9 +1,8 @@
 import json
 import secrets
 import uuid
-from ast import Set
 from typing import Any, Optional
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse, urlunparse
+from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 import httpx
 from fastapi import BackgroundTasks, HTTPException, Request, Response
@@ -12,8 +11,9 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
 from google.oauth2 import id_token
 from redis.asyncio import Redis
-from requests import request
-from sqlmodel import Session, select
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import (
     ACCESS_TOKEN_MINUTES,
@@ -35,7 +35,6 @@ from app.common.utils import (
     extract_redirect_uri,
     generate_random_username,
 )
-from app.core.dependencies import SessionDep
 from app.core.security import create_jwt_token, decode_token, oauth, verify_state
 from app.models.provider_model import Provider
 from app.models.user_model import Account, Profile
@@ -44,10 +43,11 @@ from app.schemas.account import AccessToken, RefreshToken
 
 async def google_one_tap(
     id_token: str,
-    session: Session,
+    session: AsyncSession,
     background_tasks: BackgroundTasks,
     redirect: str | None = None,
 ):
+
     userinfo = verify_google_auth_token(id_token)
     email = userinfo["email"]
     sub = userinfo["sub"]
@@ -65,7 +65,7 @@ async def google_one_tap(
 
 async def google_callback_handler(
     request: Request,
-    session: Session,
+    session: AsyncSession,
     state: str | None,
     current_user: Optional[Account],
     redis: Redis,
@@ -113,7 +113,7 @@ async def google_callback_handler(
 
 async def github_callback_handler(
     request: Request,
-    session: Session,
+    session: AsyncSession,
     state: str | None,
     current_user: Optional[Account],
     redis: Redis,
@@ -162,9 +162,11 @@ async def github_callback_handler(
     )
 
 
-async def dropbox_callback_handler(request: Request, session: Session, redis: Redis):
+async def dropbox_callback_handler(
+    request: Request, session: AsyncSession, redis: Redis
+):
 
-    [account, payload] = get_account_from_state(request, session)
+    [account, payload] = await get_account_from_state(request, session)
 
     assert oauth.dropbox is not None
     token = await oauth.dropbox.authorize_access_token(request)
@@ -185,10 +187,12 @@ async def dropbox_callback_handler(request: Request, session: Session, redis: Re
     # TODO:  check if provider already exists show message to attach new provider
 
     id_exists = bool(
-        session.exec(
-            select(Provider).where(
-                Provider.provider_id == provider_id,
-                Provider.provider == Providers.DROP_BOX,
+        (
+            await session.exec(
+                select(Provider).where(
+                    Provider.provider_id == provider_id,
+                    Provider.provider == Providers.DROP_BOX,
+                )
             )
         ).first()
     )
@@ -210,9 +214,12 @@ async def dropbox_callback_handler(request: Request, session: Session, redis: Re
             status_code=303,
         )
 
-    provider = session.exec(
-        select(Provider).where(
-            Provider.account_id == account.id, Provider.provider == Providers.DROP_BOX
+    provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.account_id == account.id,
+                Provider.provider == Providers.DROP_BOX,
+            )
         )
     ).first()
 
@@ -245,7 +252,7 @@ async def dropbox_callback_handler(request: Request, session: Session, redis: Re
     set_provider_tokens(provider, access_token, refresh_token, scopes, provider_id)
 
     session.add(provider)
-    session.commit()
+    await session.commit()
 
     if payload.get("redirect"):
         return RedirectResponse(
@@ -259,7 +266,7 @@ async def refresh_token(
     request: Request,
     response: Response,
     data: Optional[RefreshToken],
-    session: Session,
+    session: AsyncSession,
 ):
     refresh_token = request.cookies.get("refresh_token")
 
@@ -275,7 +282,7 @@ async def refresh_token(
     if token.get("type") != "refresh":
         raise HTTPException(400, "Not a refresh token")
 
-    user = session.get(Account, token.get("user_id"))
+    user = await session.get(Account, token.get("user_id"))
 
     if not user:
         raise HTTPException(400, "User does not exists")
@@ -296,15 +303,17 @@ async def refresh_token(
 async def google_incremental_auth(
     request: Request,
     required_scopes: str,
-    session: Session,
+    session: AsyncSession,
     current_user: Account,
     redirect: Optional[str],
 ):
 
-    google_provider = session.exec(
-        select(Provider).where(
-            Provider.provider == Providers.GOOGLE,
-            Provider.account_id == current_user.id,
+    google_provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.provider == Providers.GOOGLE,
+                Provider.account_id == current_user.id,
+            )
         )
     ).first()
 
@@ -371,12 +380,14 @@ async def google_incremental_auth(
 
 
 async def get_google_access_token_from_refresh(
-    current_user: Account, session: Session
+    current_user: Account, session: AsyncSession
 ) -> dict[str, Any]:
-    google_provider = session.exec(
-        select(Provider).where(
-            Provider.provider == Providers.GOOGLE,
-            Provider.account_id == current_user.id,
+    google_provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.provider == Providers.GOOGLE,
+                Provider.account_id == current_user.id,
+            )
         )
     ).first()
 
@@ -418,12 +429,14 @@ async def get_google_access_token_from_refresh(
 
 
 async def get_dropbox_access_token_from_refresh(
-    current_user: Account, session: Session
+    current_user: Account, session: AsyncSession
 ) -> dict[str, str]:
-    dropbox_provider = session.exec(
-        select(Provider).where(
-            Provider.provider == Providers.DROP_BOX,
-            Provider.account_id == current_user.id,
+    dropbox_provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.provider == Providers.DROP_BOX,
+                Provider.account_id == current_user.id,
+            )
         )
     ).first()
 
@@ -456,7 +469,7 @@ async def get_dropbox_access_token_from_refresh(
 
 
 async def replace_provider(
-    temp_id: str, session: Session, redis: Redis, current_user: Account
+    temp_id: str, session: AsyncSession, redis: Redis, current_user: Account
 ):
     new_data = await retrieve_stored_provider(temp_id, redis)
 
@@ -464,15 +477,17 @@ async def replace_provider(
         raise HTTPException(status_code=403, detail="Not authorized")
 
     # Delete existing provider record
-    existing_provider = session.exec(
-        select(Provider).where(
-            Provider.account_id == current_user.id,
-            Provider.provider == new_data["provider"],
+    existing_provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.account_id == current_user.id,
+                Provider.provider == new_data["provider"],
+            )
         )
     ).first()
     if existing_provider:
-        session.delete(existing_provider)
-        session.commit()
+        await session.delete(existing_provider)
+        await session.commit()
 
     # Save new provider record
     new_provider = Provider(
@@ -489,7 +504,7 @@ async def replace_provider(
         new_data["provider_id"],
     )
     session.add(new_provider)
-    session.commit()
+    await session.commit()
 
     # Cleanup
     await redis.delete(f"temp:provider:{temp_id}")
@@ -501,7 +516,7 @@ async def replace_provider(
 
 
 async def authorize_or_register(
-    session: Session,
+    session: AsyncSession,
     email: str,
     provider: Providers,
     provider_id: str,
@@ -512,26 +527,28 @@ async def authorize_or_register(
     refresh_token: Optional[str] = None,
 ):
     # Upsert user
-    statement = select(Provider).where(
-        Provider.provider == provider, Provider.provider_id == provider_id
+    statement = (
+        select(Provider)
+        .where(Provider.provider == provider, Provider.provider_id == provider_id)
+        .options(selectinload(Provider.account).selectinload(Account.profile))
     )
-    existing = session.exec(statement).first()
+    existing = (await session.exec(statement)).first()
 
     if existing:
         user = existing.account
         set_provider_tokens(existing, access_token, refresh_token, scopes, provider_id)
         session.add(existing)
     else:
-        user = create_account(session, email)
+        user = await create_account(session, email)
         if not user:
             return RedirectResponse(
                 FRONTEND_URL + f"?message={MessagePatterns.MESSAGE_ACCOUNT_EXISTS}",
                 status_code=303,
             )
-        session.flush()
+        await session.flush()
         create_provider(session, user.id, provider, provider_id, scopes or "")
 
-    session.commit()
+    await session.commit()
 
     if not existing:
         await send_email(
@@ -594,17 +611,19 @@ async def authorize_or_register(
     }
 
 
-def create_account(
-    session: Session,
+async def create_account(
+    session: AsyncSession,
     email: str,
 ) -> Optional[Account]:
 
-    account = session.exec(select(Account).where(Account.email == email)).first()
+    account = (
+        await session.exec(select(Account).where(Account.email == email))
+    ).first()
 
     if not account:
         profile = Profile()  # type: ignore
         account = Account(
-            username=generate_random_username(session, email.split("@")[0]),
+            username=await generate_random_username(session, email.split("@")[0]),
             email=email,
             profile=profile,
         )
@@ -613,7 +632,7 @@ def create_account(
 
 
 def create_provider(
-    session: Session,
+    session: AsyncSession,
     account_id: uuid.UUID,
     provider: Providers,
     provider_id: str,
@@ -632,7 +651,7 @@ def create_provider(
 async def manual_oauth_callback(
     request: Request,
     current_user: Optional[Account],
-    session: Session,
+    session: AsyncSession,
     state_data: dict[str, str],
     redis: Redis,
 ):
@@ -676,10 +695,12 @@ async def manual_oauth_callback(
             raise HTTPException(status_code=400, detail="No user info from Google")
         userinfo = verify_google_auth_token(id_token)
 
-    provider = session.exec(
-        select(Provider).where(
-            Provider.provider == Providers.GOOGLE,
-            Provider.account_id == current_user.id,
+    provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.provider == Providers.GOOGLE,
+                Provider.account_id == current_user.id,
+            )
         )
     ).first()
 
@@ -717,14 +738,14 @@ async def manual_oauth_callback(
     )
 
     session.add(provider)
-    session.commit()
+    await session.commit()
 
     return RedirectResponse(redirect, status_code=303)
 
 
 async def add_github_account(
     current_user: Optional[Account],
-    session: Session,
+    session: AsyncSession,
     state_data: dict[str, str],
     redis: Redis,
     scopes: str,
@@ -736,10 +757,12 @@ async def add_github_account(
     if state_data.get("user_id") != str(current_user.id):
         raise HTTPException(403, "User mismatch")
 
-    provider = session.exec(
-        select(Provider).where(
-            Provider.provider == Providers.GITHUB,
-            Provider.account_id == current_user.id,
+    provider = (
+        await session.exec(
+            select(Provider).where(
+                Provider.provider == Providers.GITHUB,
+                Provider.account_id == current_user.id,
+            )
         )
     ).first()
 
@@ -770,7 +793,7 @@ async def add_github_account(
 
     set_provider_tokens(provider, None, None, scopes, provider_id)
     session.add(provider)
-    session.commit()
+    await session.commit()
 
     return RedirectResponse(redirect, status_code=303)
 
@@ -793,7 +816,7 @@ def verify_google_auth_token(id_token_str: str) -> dict:
         raise HTTPException(status_code=400, detail=f"Invalid ID token: {e}")
 
 
-def get_account_from_state(request: Request, session: Session):
+async def get_account_from_state(request: Request, session: AsyncSession):
     raw_state = request.query_params.get("state", "")
 
     if not raw_state:
@@ -807,7 +830,7 @@ def get_account_from_state(request: Request, session: Session):
 
     user_id = payload.get("user_id")
 
-    account = session.get(Account, user_id)
+    account = await session.get(Account, user_id)
 
     if not account:
         raise HTTPException(status_code=400, detail="Invalid OAuth state")

@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     from .chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
     from .comments_model import Comment, CommentLike, Rating
     from .courses_model import Course, CourseEnrollment, CourseProgress, QuizAttempt
+    from .notification_model import Notification
     from .provider_model import Provider
 
 
@@ -30,7 +31,11 @@ class Account(AppBaseModelMixin, AccountBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     profile: Optional["Profile"] = Relationship(
         back_populates="account",
-        sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
+        sa_relationship_kwargs={
+            "uselist": False,
+            "cascade": "all, delete-orphan",
+            "lazy": "selectin",
+        },
     )
     providers: list["Provider"] = Relationship(
         back_populates="account",
@@ -85,6 +90,9 @@ class Account(AppBaseModelMixin, AccountBase, table=True):
     )
 
     document_chats: list["DocumentChat"] = Relationship(
+        back_populates="account", passive_deletes="all"
+    )
+    notifications: list["Notification"] = Relationship(
         back_populates="account", passive_deletes="all"
     )
 

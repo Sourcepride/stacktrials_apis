@@ -6,11 +6,12 @@
     "strings": false
   },
   "editor.suggest.showModules": true,
-  "cSpell.words": ["stacktrails"],
+  "cSpell.words": [
+    "stacktrails"
+  ],
   "files.watcherExclude": {
     "**/venv/*/**": true,
-
-  
-}
-
+  },
+  "python.languageServer": "None",
+  "cursorpyright.analysis.autoImportCompletions": true
 }

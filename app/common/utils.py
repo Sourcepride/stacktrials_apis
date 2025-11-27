@@ -5,24 +5,28 @@ import random
 import re
 import string
 import unicodedata
-from typing import Any, List, Optional, TypeVar, Union
+import uuid
+from typing import Any, Awaitable, Callable, List, Optional, Sequence, TypeVar, Union
 from urllib.parse import urljoin, urlparse
 
-from cryptography.fernet import Fernet
+from fastapi import HTTPException, WebSocketException
 from sqlalchemy import Select, func
-from sqlmodel import Session, SQLModel, select
+from sqlmodel import SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE, SECRET_KEY
 from app.models.user_model import Account
 
 
-def generate_random_username(session: Session, name: str, addons: int = 8) -> str:
+async def generate_random_username(
+    session: AsyncSession, name: str, addons: int = 8
+) -> str:
     while True:
         username = f"{name}@" + "".join(
             random.choices(string.ascii_lowercase + string.digits, k=addons)
         )
-        username_exists = session.exec(
-            select(Account).where(Account.username == username)
+        username_exists = (
+            await session.exec(select(Account).where(Account.username == username))
         ).first()
 
         if not username_exists:
@@ -39,8 +43,8 @@ def safe_json_loads(data, default=None):
 T = TypeVar("T", bound=SQLModel)
 
 
-def paginate(
-    session: Session,
+async def paginate(
+    session: AsyncSession,
     selected_model: Union[type[T], Select],
     page: int = 1,
     per_page: int = PER_PAGE,
@@ -69,7 +73,7 @@ def paginate(
 
     # Get paginated items
     paginated_query = query.offset(offset).limit(per_page)
-    items: List[T] = session.exec(paginated_query).all()  # type: ignore
+    items: List[T] = (await session.exec(paginated_query)).all()  # type: ignore
 
     # Get total count
     try:
@@ -81,13 +85,13 @@ def paginate(
             # For simple queries, count the table directly
             count_query = select(func.count()).select_from(query.froms[0])
 
-        total = session.exec(count_query).one()
+        total = (await session.exec(count_query)).one()
     except Exception as e:
         # Fallback: try a simpler count approach
         try:
             # Remove offset/limit and count
             base_query = query.offset(None).limit(None)
-            total = len(session.exec(base_query).all())  # type: ignore
+            total = len((await session.exec(base_query)).all())  # type: ignore
         except Exception:
             # Final fallback: use length of current items
             total = len(items)
@@ -164,3 +168,60 @@ def extract_redirect_uri(redirect: str, base_url: str):
 
 def accepted_mime():
     pass
+
+
+def ws_code_from_http_code(code: int):
+    if code == 500:
+        return 1011
+    if code == 404 or code == 403:
+        return 1008
+    if code == 400:
+        return 1002
+    return code
+
+
+async def websocket_error_wrapper(
+    async_func: Callable[..., Awaitable[Any]], *args, **kwargs
+):
+    try:
+        return await async_func()
+    except Exception as e:
+        if isinstance(e, HTTPException):
+            raise WebSocketException(ws_code_from_http_code(e.status_code), e.detail)
+        raise WebSocketException(
+            ws_code_from_http_code(1011), "An internal server error occurred"
+        )
+
+
+def generate_base_64_encoded_uuid() -> str:
+    return base64.urlsafe_b64encode(str(uuid.uuid4()).encode()).decode("utf-8")
+
+
+class CursorPaginationSerializer:
+    def __init__(
+        self,
+        items: Sequence[Any],
+        last_message_id: Any,
+        recent_message_id: Any,
+        hasNext: bool,
+    ) -> None:
+        self.items = items
+        self.last_message_id = last_message_id
+        self.recent_message_id = recent_message_id
+        self.hasNext = hasNext
+
+    def __call__(self) -> dict[str, Any]:
+        return {
+            "items": self.items,
+            "last_message_id": self.last_message_id,
+            "recent_message_id": self.recent_message_id,
+            "hasNext": self.hasNext,
+        }
+
+
+def chat_history_ws_channel(current_user: Account):
+    return f"personal_chat:{current_user.id}"
+
+
+def notification_ws_channel(current_user: Account):
+    return f"notification:{current_user.id}"

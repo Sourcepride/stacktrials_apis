@@ -31,7 +31,7 @@ async def change_username(
     current_user: CurrentActiveUser,
     session: SessionDep,
 ):
-    return update_username(username, current_user, session)
+    return await update_username(username, current_user, session)
 
 
 @router.get("/username/exists", response_model=OkModel)

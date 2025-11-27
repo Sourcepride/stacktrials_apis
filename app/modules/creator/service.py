@@ -1,7 +1,8 @@
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlmodel import Session, col, func, select
+from sqlmodel import col, func, select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import PER_PAGE
 from app.common.enum import CourseStatus
@@ -13,46 +14,44 @@ from app.schemas.courses import CreatorStat
 
 class CreatorService:
     @staticmethod
-    async def course_stat(current_user: Account, session: Session):
+    async def course_stat(current_user: Account, session: AsyncSession):
         total_enrolled = (
-            session.exec(
+            await session.exec(
                 select(func.sum(Course.enrollment_count)).where(
                     Course.account_id == current_user.id
                 )
-            ).one_or_none()
-            or 0
-        )
+            )
+        ).one_or_none() or 0
         total_reviews = (
-            session.exec(
+            await session.exec(
                 select(func.sum(Course.total_rating)).where(
                     Course.account_id == current_user.id
                 )
-            ).one_or_none()
-            or 0
-        )
+            )
+        ).one_or_none() or 0
         total_comments = (
-            session.exec(
+            await session.exec(
                 select(func.sum(Course.comment_count)).where(
                     Course.account_id == current_user.id
                 )
-            ).one_or_none()
-            or 0
-        )
-        average_rating = session.exec(
-            select(func.avg(Course.average_rating)).where(
-                Course.account_id == current_user.id
+            )
+        ).one_or_none() or 0
+        average_rating = (
+            await session.exec(
+                select(func.avg(Course.average_rating)).where(
+                    Course.account_id == current_user.id
+                )
             )
         ).one_or_none()
 
         total_published = (
-            session.exec(
+            await session.exec(
                 select(func.count(col(Course.id))).where(
                     Course.status == CourseStatus.PUBLISHED,
                     Course.account_id == current_user.id,
                 )
-            ).one_or_none()
-            or 0
-        )
+            )
+        ).one_or_none() or 0
 
         print("____________________", average_rating)
 
@@ -67,7 +66,7 @@ class CreatorService:
     async def created_videos(
         title: Optional[str],
         current_user: Account,
-        session: Session,
+        session: AsyncSession,
         page: int = 1,
         per_page: int = PER_PAGE,
     ):
@@ -75,18 +74,20 @@ class CreatorService:
         if title:
             query = query.where(col(Course.title).ilike(f"%{title}%"))
 
-        return paginate(session, query, page, per_page)
+        return await paginate(session, query, page, per_page)
 
     @staticmethod
     async def page_videos(
         title: Optional[str],
         username: str,
-        session: Session,
+        session: AsyncSession,
         page: int = 1,
         per_page: int = PER_PAGE,
     ):
 
-        user = session.exec(select(Account).where(Account.username == username)).first()
+        user = (
+            await session.exec(select(Account).where(Account.username == username))
+        ).first()
         if not user:
             raise HTTPException(404, "user not found")
 
@@ -94,4 +95,4 @@ class CreatorService:
         if title:
             query = query.where(col(Course.title).ilike(f"%{title}%"))
 
-        return paginate(session, query, page, per_page)
+        return await paginate(session, query, page, per_page)

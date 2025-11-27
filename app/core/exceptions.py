@@ -12,7 +12,13 @@ def expand_env(obj):
     elif isinstance(obj, list):
         return [expand_env(i) for i in obj]
     elif isinstance(obj, str) and obj.startswith("${") and obj.endswith("}"):
-        return os.getenv(obj[2:-1])
+        var_expr = obj[2:-1]  # Remove ${ and }
+        # Support default values: ${VAR:DEFAULT}
+        if ":" in var_expr:
+            var_name, default_value = var_expr.split(":", 1)
+            return os.getenv(var_name, default_value)
+        else:
+            return os.getenv(var_expr)
     else:
         return obj
 
