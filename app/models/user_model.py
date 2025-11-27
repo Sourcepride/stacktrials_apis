@@ -31,7 +31,11 @@ class Account(AppBaseModelMixin, AccountBase, table=True):
     id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
     profile: Optional["Profile"] = Relationship(
         back_populates="account",
-        sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
+        sa_relationship_kwargs={
+            "uselist": False,
+            "cascade": "all, delete-orphan",
+            "lazy": "selectin",
+        },
     )
     providers: list["Provider"] = Relationship(
         back_populates="account",

@@ -21,13 +21,13 @@ from app.models.courses_model import (
     TagBase,
     VideoContentBase,
 )
-from app.models.user_model import Account, AccountBase, Profile
+from app.models.user_model import Account, AccountBase, Profile, ProfileBase
 from app.schemas.base import PaginatedSchema
 
 
 class AccountRead(AccountBase):
     id: uuid.UUID
-    profile: Optional["Profile"] = None
+    profile: Optional["ProfileBase"] = None
 
 
 class CourseRead(CourseBase):
@@ -42,6 +42,8 @@ class CourseRead(CourseBase):
     comment_count: int
     updated_at: datetime
     tags: list["TagRead"]
+
+    # model_config = {"from_attributes": True}
 
 
 class PaginatedCourse(PaginatedSchema):
@@ -114,7 +116,7 @@ class ModuleRead(ModuleBase):
     section_id: uuid.UUID
     video_content: Optional["VideoContentRead"] = None
     document_content: Optional["DocumentContentRead"] = None
-    quiz_content: Optional["QuizContent"] = None
+    quiz_content: Optional["QuizContentBase"] = None
     attachments: list["ModuleAttachmentRead"]
     module_type: ModuleType
 

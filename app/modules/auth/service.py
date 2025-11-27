@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from google.auth.transport import requests
 from google.oauth2 import id_token
 from redis.asyncio import Redis
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -46,24 +47,20 @@ async def google_one_tap(
     background_tasks: BackgroundTasks,
     redirect: str | None = None,
 ):
-    try:
-        userinfo = verify_google_auth_token(id_token)
-        email = userinfo["email"]
-        sub = userinfo["sub"]
 
-        print("------------", sub, email, userinfo)
+    userinfo = verify_google_auth_token(id_token)
+    email = userinfo["email"]
+    sub = userinfo["sub"]
 
-        return await authorize_or_register(
-            session,
-            email,
-            Providers.GOOGLE,
-            sub,
-            background_tasks,
-            "openid email profile",
-            {"redirect": redirect or "/en"},
-        )
-    except Exception as e:
-        print("=======================", e)
+    return await authorize_or_register(
+        session,
+        email,
+        Providers.GOOGLE,
+        sub,
+        background_tasks,
+        "openid email profile",
+        {"redirect": redirect or "/en"},
+    )
 
 
 async def google_callback_handler(
@@ -530,8 +527,10 @@ async def authorize_or_register(
     refresh_token: Optional[str] = None,
 ):
     # Upsert user
-    statement = select(Provider).where(
-        Provider.provider == provider, Provider.provider_id == provider_id
+    statement = (
+        select(Provider)
+        .where(Provider.provider == provider, Provider.provider_id == provider_id)
+        .options(selectinload(Provider.account).selectinload(Account.profile))
     )
     existing = (await session.exec(statement)).first()
 

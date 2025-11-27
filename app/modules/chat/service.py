@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import BackgroundTasks, HTTPException, WebSocketException
+from sqlalchemy.orm import selectinload
 from sqlmodel import and_, col, desc, func, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -61,8 +62,27 @@ class ChatService:
         limit: int = PER_PAGE,
     ):
         await ChatService.get_chat_or_raise(chat_id, str(current_user.id), session)
-        query = select(Message).where(
-            Message.chat_id == chat_id, Message.is_deleted == False
+        query = (
+            select(Message)
+            .where(Message.chat_id == chat_id, Message.is_deleted == False)
+            .options(
+                selectinload(Message.sender)
+                .selectinload(ChatMember.account)
+                .selectinload(Account.profile),
+                selectinload(Message.reactions)
+                .selectinload(MessageReaction.account)
+                .selectinload(Account.profile),
+                selectinload(Message.chat)
+                .selectinload(Chat.account)
+                .selectinload(Account.profile),
+                selectinload(Message.chat)
+                .selectinload(Chat.course)
+                .selectinload(Course.author)
+                .selectinload(Account.profile),
+                selectinload(Message.chat)
+                .selectinload(Chat.course)
+                .selectinload(Course.tags),
+            )
         )
 
         # total_messages = (
@@ -109,6 +129,13 @@ class ChatService:
             select(Chat)
             .join(ChatMember)
             .where(ChatMember.account_id == current_user.id)
+            .options(
+                selectinload(Chat.account).selectinload(Account.profile),
+                selectinload(Chat.course)
+                .selectinload(Course.author)
+                .selectinload(Account.profile),
+                selectinload(Chat.course).selectinload(Course.tags),
+            )
         )
 
         if q:
@@ -182,8 +209,19 @@ class ChatService:
         """
 
         # Base: only PUBLIC chats
-        query = select(Chat).where(
-            Chat.privacy == GroupChatPrivacy.PUBLIC, Chat.chat_type == ChatType.GROUP
+        query = (
+            select(Chat)
+            .where(
+                Chat.privacy == GroupChatPrivacy.PUBLIC,
+                Chat.chat_type == ChatType.GROUP,
+            )
+            .options(
+                selectinload(Chat.account).selectinload(Account.profile),
+                selectinload(Chat.course)
+                .selectinload(Course.author)
+                .selectinload(Account.profile),
+                selectinload(Chat.course).selectinload(Course.tags),
+            )
         )
 
         if q:
@@ -256,8 +294,23 @@ class ChatService:
 
         session.add(member)
         await session.commit()
-        await session.refresh(chat)
 
+        # Reload chat with account.profile and course for ChatRead
+        chat = (
+            await session.exec(
+                select(Chat)
+                .where(Chat.id == chat.id)
+                .options(
+                    selectinload(Chat.account).selectinload(Account.profile),
+                    selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Chat.course).selectinload(Course.tags),
+                )
+            )
+        ).first()
+        if not chat:
+            raise HTTPException(404, "Chat not found after creation")
         return chat
 
     @staticmethod
@@ -285,8 +338,23 @@ class ChatService:
         chat.sqlmodel_update(data.model_dump())
         session.add(chat)
         await session.commit()
-        await session.refresh(chat)
 
+        # Reload chat with account.profile and course for ChatRead
+        chat = (
+            await session.exec(
+                select(Chat)
+                .where(Chat.id == chat.id)
+                .options(
+                    selectinload(Chat.account).selectinload(Account.profile),
+                    selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Chat.course).selectinload(Course.tags),
+                )
+            )
+        ).first()
+        if not chat:
+            raise HTTPException(404, "Chat not found after update")
         return chat
 
     @staticmethod
@@ -398,7 +466,31 @@ class ChatService:
 
         await session.commit()
 
-        await session.refresh(message)
+        # Reload message with all relationships
+        message = (
+            await session.exec(
+                select(Message)
+                .where(Message.id == message.id)
+                .options(
+                    selectinload(Message.sender)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.reactions)
+                    .selectinload(MessageReaction.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.tags),
+                )
+            )
+        ).first()
         return message
 
     @staticmethod
@@ -411,9 +503,28 @@ class ChatService:
 
         message = (
             await session.exec(
-                select(Message).where(
+                select(Message)
+                .where(
                     Message.id == message_id,
                     Message.sender_id == current_user.id,
+                )
+                .options(
+                    selectinload(Message.sender)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.reactions)
+                    .selectinload(MessageReaction.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.tags),
                 )
             )
         ).first()
@@ -431,7 +542,31 @@ class ChatService:
         session.add(message)
         await session.commit()
 
-        await session.refresh(message)
+        # Reload message with all relationships
+        message = (
+            await session.exec(
+                select(Message)
+                .where(Message.id == message.id)
+                .options(
+                    selectinload(Message.sender)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.reactions)
+                    .selectinload(MessageReaction.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.tags),
+                )
+            )
+        ).first()
         return message
 
     @staticmethod
@@ -440,9 +575,28 @@ class ChatService:
     ):
         message = (
             await session.exec(
-                select(Message).where(
+                select(Message)
+                .where(
                     Message.id == message_id,
                     Message.sender_id == current_user.id,
+                )
+                .options(
+                    selectinload(Message.sender)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.reactions)
+                    .selectinload(MessageReaction.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.tags),
                 )
             )
         ).first()
@@ -456,7 +610,34 @@ class ChatService:
         message.is_deleted = True
         session.add(message)
         await session.commit()
-        await session.refresh(message)
+
+        # Reload message with all relationships
+        message = (
+            await session.exec(
+                select(Message)
+                .where(Message.id == message.id)
+                .options(
+                    selectinload(Message.sender)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.reactions)
+                    .selectinload(MessageReaction.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.account)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Message.chat)
+                    .selectinload(Chat.course)
+                    .selectinload(Course.tags),
+                )
+            )
+        ).first()
+        if not message:
+            raise HTTPException(404, "Message not found after deletion")
         return message
 
     @staticmethod
@@ -507,7 +688,16 @@ class ChatService:
 
         invite = (
             await session.exec(
-                select(ChatInvite).where(ChatInvite.invite_code == token)
+                select(ChatInvite)
+                .where(ChatInvite.invite_code == token)
+                .options(
+                    selectinload(ChatInvite.invited_by)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(ChatInvite.invited_account).selectinload(
+                        Account.profile
+                    ),
+                )
             )
         ).first()
         if not invite or not invite.is_active:
@@ -564,8 +754,17 @@ class ChatService:
         # increment invite usage
         invite.current_uses += 1
         await session.commit()
-        await session.refresh(new_member)
 
+        # Reload ChatMember with account.profile
+        new_member = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.id == new_member.id)
+                .options(selectinload(ChatMember.account).selectinload(Account.profile))
+            )
+        ).first()
+        if not new_member:
+            raise HTTPException(404, "ChatMember not found after creation")
         return new_member
 
     @staticmethod
@@ -593,6 +792,7 @@ class ChatService:
                 select(ChatMember)
                 .where(ChatMember.chat_id == chat.id)
                 .where(ChatMember.account_id == current_user.id)
+                .options(selectinload(ChatMember.account).selectinload(Account.profile))
             )
         ).first()
         if not member:
@@ -617,7 +817,24 @@ class ChatService:
 
         session.add(invite)
         await session.commit()
-        await session.refresh(invite)
+
+        # Reload invite with all relationships
+        invite = (
+            await session.exec(
+                select(ChatInvite)
+                .where(ChatInvite.id == invite.id)
+                .options(
+                    selectinload(ChatInvite.invited_by)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(ChatInvite.invited_account).selectinload(
+                        Account.profile
+                    ),
+                )
+            )
+        ).first()
+        if not invite:
+            raise HTTPException(404, "Invite not found after creation")
 
         trans = translation(lang)
 
@@ -968,6 +1185,13 @@ class ChatService:
                 select(Chat)
                 .join(ChatMember)
                 .where(Chat.id == chat_id, ChatMember.account_id == account_id)
+                .options(
+                    selectinload(Chat.account).selectinload(Account.profile),
+                    selectinload(Chat.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Chat.course).selectinload(Course.tags),
+                )
             )
         ).first()
         if not chat:

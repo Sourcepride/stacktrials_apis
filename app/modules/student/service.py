@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException
+from sqlalchemy.orm import selectinload
 from sqlmodel import asc, col, desc, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -101,22 +102,36 @@ class StudentService:
         module_id: str,
         status: bool = True,
     ):
-        resp = await StudentService._toggle_module_status(
-            current_user, session, module_id, status
-        )
+        try:
+            enrollment, _ = await StudentService._toggle_module_status(
+                current_user, session, module_id, status
+            )
+            await session.commit()
 
-        await session.commit()
+            # Reload enrollment to ensure it's fresh from database
+            enrollment = (
+                await session.exec(
+                    select(CourseEnrollment).where(CourseEnrollment.id == enrollment.id)
+                )
+            ).first()
+            if not enrollment:
+                raise HTTPException(404, "Enrollment not found after update")
 
-        await session.refresh(resp[0])
-
-        return resp[0]
+            return enrollment
+        except Exception as e:
+            await session.rollback()
+            raise e
 
     @staticmethod
     async def increment_progress(
         current_user: Account, session: AsyncSession, module_id: str
     ):
         module = (
-            await session.exec(select(Module).where(Module.id == module_id))
+            await session.exec(
+                select(Module)
+                .where(Module.id == module_id)
+                .options(selectinload(Module.section).selectinload(Section.course))
+            )
         ).first()
 
         if not module:
@@ -130,7 +145,6 @@ class StudentService:
                 )
             )
         ).first()
-
         if not progress:
             raise HTTPException(404, "progress not found make sure you have enrolled")
 
@@ -153,7 +167,6 @@ class StudentService:
                 .order_by(desc(Section.order_index))
             )
         ).first()
-
         if not last_section:
             raise HTTPException(404, "last section not found")
 
@@ -164,7 +177,6 @@ class StudentService:
                 .order_by(desc(Module.order_index))
             )
         ).first()
-
         if not last_module:
             raise HTTPException(404, "last module not found")
 
@@ -186,8 +198,8 @@ class StudentService:
             ).first()
 
             if next_module:
-                updates["next_module"] = next_module.id
-                updates["next_section"] = next_module.section_id
+                updates["next_module"] = str(next_module.id)
+                updates["next_section"] = str(next_module.section_id)
             else:
                 next_section = (
                     await session.exec(
@@ -196,6 +208,7 @@ class StudentService:
                             Section.course_id == module.section.course_id,
                             Section.order_index > module.section.order_index,
                         )
+                        .options(selectinload(Section.modules))
                         .order_by(asc(Section.order_index))
                     )
                 ).first()
@@ -203,10 +216,10 @@ class StudentService:
                 if not next_section:
                     raise ValueError("can not find next_module")
 
-                updates["next_module"] = sorted(
-                    next_section.modules, key=lambda x: x.order_index
-                )[0].id
-                updates["next_section"] = next_section.id
+                updates["next_module"] = str(
+                    sorted(next_section.modules, key=lambda x: x.order_index)[0].id
+                )
+                updates["next_section"] = str(next_section.id)
 
         if not progress.last_active_date:
             updates["current_streak"] = 1
@@ -230,7 +243,15 @@ class StudentService:
 
         session.add(progress)
         await session.commit()
-        await session.refresh(progress)
+
+        # Reload progress to ensure it's fresh from database
+        progress = (
+            await session.exec(
+                select(CourseProgress).where(CourseProgress.id == progress.id)
+            )
+        ).first()
+        if not progress:
+            raise HTTPException(404, "Progress not found after update")
 
         return progress
 
@@ -261,7 +282,11 @@ class StudentService:
     ):
 
         module = (
-            await session.exec(select(Module).where(Module.id == module_id))
+            await session.exec(
+                select(Module)
+                .where(Module.id == module_id)
+                .options(selectinload(Module.section).selectinload(Section.course))
+            )
         ).first()
         if not module:
             raise HTTPException(404, "Module not found")

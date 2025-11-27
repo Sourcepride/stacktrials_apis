@@ -91,7 +91,10 @@ class Course(AppBaseModelMixin, CourseBase, table=True):
     enrollment_count: int = Field(default=0)
     comment_count: int = Field(default=0)
 
-    author: Optional["Account"] = Relationship(back_populates="courses")
+    author: Optional["Account"] = Relationship(
+        back_populates="courses",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
     sections: list["Section"] = Relationship(
         back_populates="course",
         passive_deletes="all",
@@ -112,7 +115,11 @@ class Course(AppBaseModelMixin, CourseBase, table=True):
     comments: list["Comment"] = Relationship(
         back_populates="course", passive_deletes="all"
     )
-    tags: list["Tag"] = Relationship(back_populates="courses", link_model=CourseTag)
+    tags: list["Tag"] = Relationship(
+        back_populates="courses",
+        link_model=CourseTag,
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
 
 
 class TagBase(AppSQLModel):
@@ -190,7 +197,10 @@ class Module(AppBaseModelMixin, ModuleBase, table=True):
     section: Section = Relationship(back_populates="modules")
     video_content: Optional["VideoContent"] = Relationship(
         back_populates="module",
-        sa_relationship_kwargs={"uselist": False, "cascade": "all, delete-orphan"},
+        sa_relationship_kwargs={
+            "uselist": False,
+            "cascade": "all, delete-orphan",
+        },
     )
     document_content: Optional["DocumentContent"] = Relationship(
         back_populates="module",
@@ -363,7 +373,8 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
         foreign_key="course.id", index=True, ondelete="SET NULL"
     )
     enrollment_date: datetime = Field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
+        default_factory=lambda: datetime.now(tz=timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
     completion_date: Optional[datetime] = Field(
         default=None,
@@ -374,7 +385,8 @@ class CourseEnrollment(CourseEnrollmentBase, table=True):
     )
     progress_percentage: float = Field(default=0.0, ge=0, le=100)
     last_accessed: datetime = Field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
+        default_factory=lambda: datetime.now(tz=timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
     )
 
     # Relationships

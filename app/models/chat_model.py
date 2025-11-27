@@ -49,7 +49,10 @@ class Chat(AppBaseModelMixin, ChatBase, table=True):
 
     # Relationships
     course: Optional["Course"] = Relationship(back_populates="chats")
-    account: Optional["Account"] = Relationship(back_populates="created_chats")
+    account: Optional["Account"] = Relationship(
+        back_populates="created_chats",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
     messages: list["Message"] = Relationship(back_populates="chat", cascade_delete=True)
     members: list["ChatMember"] = Relationship(
         back_populates="chat", passive_deletes="all"
@@ -108,7 +111,10 @@ class ChatMember(AppBaseModelMixin, ChatMemberBase, table=True):
     # last_read_message: Optional["Message"] = Relationship(
     #     sa_relationship_kwargs={"foreign_keys": "[ChatMember.last_read_message_id]"},
     # )
-    account: "Account" = Relationship(back_populates="chats")
+    account: "Account" = Relationship(
+        back_populates="chats",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
     messages: list["Message"] = Relationship(
         back_populates="sender",
         passive_deletes="all",
@@ -171,9 +177,13 @@ class Message(AppBaseModelMixin, MessageBase, table=True):
     )  # For replies
 
     # Relationships
-    chat: Chat = Relationship(back_populates="messages")
+    chat: Chat = Relationship(
+        back_populates="messages",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
     sender: Optional["ChatMember"] = Relationship(
         back_populates="messages",
+        sa_relationship_kwargs={"lazy": "selectin"},
     )
     reply_to: Optional["Message"] = Relationship(
         back_populates="replies",
@@ -224,7 +234,10 @@ class MessageReaction(AppBaseModelMixin, MessageReactionBase, table=True):
 
     # Relationships
     message: Message = Relationship(back_populates="reactions")
-    account: "Account" = Relationship(back_populates="chat_reactions")
+    account: "Account" = Relationship(
+        back_populates="chat_reactions",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
 
     # Unique constraint - one reaction per user per message per emoji
     class Config:
@@ -264,8 +277,14 @@ class ChatInvite(AppBaseModelMixin, ChatInviteBase, table=True):
 
     # Relationships
     chat: Chat = Relationship()
-    invited_by: ChatMember = Relationship(back_populates="chat_invites")
-    invited_account: "Account" = Relationship(back_populates="chat_invites")
+    invited_by: ChatMember = Relationship(
+        back_populates="chat_invites",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
+    invited_account: "Account" = Relationship(
+        back_populates="chat_invites",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
 
     # Indexes
     class Config:

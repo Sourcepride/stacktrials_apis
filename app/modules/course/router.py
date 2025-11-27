@@ -117,7 +117,9 @@ async def create_course(
     session: SessionDep,
     current_user: CurrentActiveUser,
 ):
-    return await CourseService.create_course(session, data, current_user)
+    response = await CourseService.create_course(session, data, current_user)
+    print(response)
+    return response
 
 
 @router.post("/section", response_model=SectionContentReadFull, status_code=201)

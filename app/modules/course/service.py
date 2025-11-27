@@ -5,6 +5,7 @@ from typing import Any, Optional, cast
 from fastapi import HTTPException, status
 from pydantic import HttpUrl
 from sqlalchemy import BinaryExpression, text
+from sqlalchemy.orm import selectinload
 from sqlmodel import asc, col, desc, func, or_, select, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -84,6 +85,10 @@ class CourseService:
                 Course.visibility == VisibilityType.PUBLIC,
             )
             .group_by(Course.id)
+            .options(
+                selectinload(Course.author).selectinload(Account.profile),
+                selectinload(Course.tags),
+            )
         )
 
         if q:
@@ -133,10 +138,17 @@ class CourseService:
         per_page: int = PER_PAGE,
     ):
 
-        base_query = select(Course).where(
-            Course.status == CourseStatus.PUBLISHED,
-            Course.visibility == VisibilityType.PUBLIC,
-            Course.enrollment_type == EnrollmentType.OPEN,
+        base_query = (
+            select(Course)
+            .where(
+                Course.status == CourseStatus.PUBLISHED,
+                Course.visibility == VisibilityType.PUBLIC,
+                Course.enrollment_type == EnrollmentType.OPEN,
+            )
+            .options(
+                selectinload(Course.author).selectinload(Account.profile),
+                selectinload(Course.tags),
+            )
         )
         if title:
             base_query = base_query.where(col(Course.title).ilike(f"%{title}%"))
@@ -174,6 +186,7 @@ class CourseService:
                 Course.visibility == VisibilityType.PUBLIC,
             )
             .distinct()  # Remove duplicates if course has multiple matching tags
+            .options(selectinload(Course.author).selectinload(Account.profile))
         )
 
         return await paginate(session, statement, page, per_page)
@@ -196,6 +209,7 @@ class CourseService:
                 desc(Course.enrollment_count),
                 desc(Course.created_at),
             )
+            .options(selectinload(Course.author).selectinload(Account.profile))
         )
 
         return await paginate(session, statement, page, per_page)
@@ -215,7 +229,20 @@ class CourseService:
 
         session.add(course)
         await session.commit()
-        await session.refresh(course)
+
+        # Reload course with author.profile and tags
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == course.id)
+                .options(
+                    selectinload(Course.author).selectinload(Account.profile),
+                    selectinload(Course.tags),
+                )
+            )
+        ).first()
+        if not course:
+            raise HTTPException(404, "Course not found after creation")
 
         if tags:
             await CourseService._sync_course_tags(session, course, tags)
@@ -241,7 +268,20 @@ class CourseService:
 
         session.add(course)
         await session.commit()
-        await session.refresh(course)
+
+        # Reload course with author.profile and tags
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == course.id)
+                .options(
+                    selectinload(Course.author).selectinload(Account.profile),
+                    selectinload(Course.tags),
+                )
+            )
+        ).first()
+        if not course:
+            raise HTTPException(404, "Course not found after update")
 
         if tags is not None:
             await CourseService._sync_course_tags(session, course, tags)
@@ -257,14 +297,64 @@ class CourseService:
 
     @staticmethod
     async def course_content(session: AsyncSession, slug: str):
-        course = await CourseService._get_course_or_404(slug, session)
+        # Load course with sections and modules for CourseContentReadMin
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.slug == slug)
+                .options(
+                    selectinload(Course.author).selectinload(Account.profile),
+                    selectinload(Course.tags),
+                    selectinload(Course.sections).selectinload(Section.modules),
+                )
+            )
+        ).first()
+        if not course:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "course not found")
         return course
 
     @staticmethod
     async def course_content_full(
         session: AsyncSession, slug: str, current_user: Account
     ):
-        course = await CourseService._get_course_or_404(slug, session, current_user)
+        # Load course with full nested structure for CourseContentReadFull
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.slug == slug)
+                .options(
+                    selectinload(Course.author).selectinload(Account.profile),
+                    selectinload(Course.tags),
+                    # -- course sections --
+                    selectinload(Course.sections)
+                    .selectinload(Section.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    # -- course sections modules --
+                    selectinload(Course.sections)
+                    .selectinload(Section.course)
+                    .selectinload(Course.tags),
+                    # -- course sections modules video content --
+                    selectinload(Course.sections)
+                    .selectinload(Section.modules)
+                    .selectinload(Module.video_content),
+                    # -- course sections modules document content --
+                    selectinload(Course.sections)
+                    .selectinload(Section.modules)
+                    .selectinload(Module.document_content),
+                    selectinload(Course.sections)
+                    .selectinload(Section.modules)
+                    .selectinload(Module.attachments),
+                    # -- course sections modules quiz content --
+                    selectinload(Course.sections)
+                    .selectinload(Section.modules)
+                    .selectinload(Module.quiz_content),
+                )
+            )
+        ).first()
+        if not course:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "course not found")
+
         course_enrollment = (
             await session.exec(
                 select(CourseEnrollment).where(
@@ -283,7 +373,13 @@ class CourseService:
     async def create_section(
         session: AsyncSession, data: SectionCreate, current_user: Account
     ):
-        course = await session.get(Course, data.course_id)
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == data.course_id)
+                .options(selectinload(Course.author).selectinload(Account.profile))
+            )
+        ).first()
 
         if not course:
             raise HTTPException(
@@ -302,7 +398,25 @@ class CourseService:
 
         session.add(section)
         await session.commit()
-        await session.refresh(section)
+
+        # Reload section with modules and course for SectionContentReadFull
+        section = (
+            await session.exec(
+                select(Section)
+                .where(Section.id == section.id)
+                .options(
+                    selectinload(Section.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Section.course).selectinload(Course.tags),
+                    selectinload(Section.modules).selectinload(Module.video_content),
+                    selectinload(Section.modules).selectinload(Module.document_content),
+                    selectinload(Section.modules).selectinload(Module.attachments),
+                )
+            )
+        ).first()
+        if not section:
+            raise HTTPException(404, "Section not found after creation")
 
         return section
 
@@ -311,7 +425,13 @@ class CourseService:
         session: AsyncSession, id: str, data: SectionUpdate, current_user: Account
     ):
 
-        section = await session.get(Section, id)
+        section = (
+            await session.exec(
+                select(Section)
+                .where(Section.id == id)
+                .options(selectinload(Section.course))
+            )
+        ).first()
 
         if not section:
             raise HTTPException(
@@ -331,13 +451,47 @@ class CourseService:
 
         session.add(section)
         await session.commit()
-        await session.refresh(section)
+
+        # Reload section with modules and course for SectionContentReadFull
+        section = (
+            await session.exec(
+                select(Section)
+                .where(Section.id == section.id)
+                .options(
+                    selectinload(Section.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Section.course).selectinload(Course.tags),
+                    selectinload(Section.modules).selectinload(Module.video_content),
+                    selectinload(Section.modules).selectinload(Module.document_content),
+                    selectinload(Section.modules).selectinload(Module.attachments),
+                    selectinload(Section.modules).selectinload(Module.quiz_content),
+                )
+            )
+        ).first()
+        if not section:
+            raise HTTPException(404, "Section not found after update")
 
         return section
 
     @staticmethod
     async def get_section(session: AsyncSession, section_id: str):
-        section = await session.get(Section, section_id)
+        section = (
+            await session.exec(
+                select(Section)
+                .where(Section.id == section_id)
+                .options(
+                    selectinload(Section.course)
+                    .selectinload(Course.author)
+                    .selectinload(Account.profile),
+                    selectinload(Section.course).selectinload(Course.tags),
+                    selectinload(Section.modules).selectinload(Module.video_content),
+                    selectinload(Section.modules).selectinload(Module.document_content),
+                    selectinload(Section.modules).selectinload(Module.attachments),
+                    selectinload(Section.modules).selectinload(Module.quiz_content),
+                )
+            )
+        ).first()
 
         if not section:
             raise HTTPException(
@@ -350,7 +504,13 @@ class CourseService:
     async def delete_section(
         session: AsyncSession, section_id: str, current_user: Account
     ):
-        section = await session.get(Section, section_id)
+        section = (
+            await session.exec(
+                select(Section)
+                .where(Section.id == section_id)
+                .options(selectinload(Section.course))
+            )
+        ).first()
 
         if not section:
             raise HTTPException(
@@ -370,7 +530,13 @@ class CourseService:
         session: AsyncSession, data: ModuleCreate, current_user: Account
     ):
 
-        section = await session.get(Section, data.section_id)
+        section = (
+            await session.exec(
+                select(Section)
+                .where(Section.id == data.section_id)
+                .options(selectinload(Section.course))
+            )
+        ).first()
 
         if not section:
             raise HTTPException(
@@ -397,7 +563,22 @@ class CourseService:
 
         session.add(module)
         await session.commit()
-        await session.refresh(module)
+
+        # Reload module with content and attachments for ModuleRead
+        module = (
+            await session.exec(
+                select(Module)
+                .where(Module.id == module.id)
+                .options(
+                    selectinload(Module.video_content),
+                    selectinload(Module.document_content),
+                    selectinload(Module.attachments),
+                    selectinload(Module.quiz_content),
+                )
+            )
+        ).first()
+        if not module:
+            raise HTTPException(404, "Module not found after creation")
 
         return module
 
@@ -406,7 +587,13 @@ class CourseService:
         session: AsyncSession, id: str, data: ModuleUpdate, current_user: Account
     ):
 
-        module = await session.get(Module, id)
+        module = (
+            await session.exec(
+                select(Module)
+                .where(Module.id == id)
+                .options(selectinload(Module.section).selectinload(Section.course))
+            )
+        ).first()
 
         if not module:
             raise HTTPException(
@@ -426,7 +613,22 @@ class CourseService:
 
         session.add(module)
         await session.commit()
-        await session.refresh(module)
+
+        # Reload module with content and attachments for ModuleRead
+        module = (
+            await session.exec(
+                select(Module)
+                .where(Module.id == module.id)
+                .options(
+                    selectinload(Module.video_content),
+                    selectinload(Module.document_content),
+                    selectinload(Module.attachments),
+                    selectinload(Module.quiz_content),
+                )
+            )
+        ).first()
+        if not module:
+            raise HTTPException(404, "Module not found after update")
 
         return module
 
@@ -434,7 +636,13 @@ class CourseService:
     async def delete_module(
         session: AsyncSession, module_id: str, current_user: Account
     ):
-        module = await session.get(Module, module_id)
+        module = (
+            await session.exec(
+                select(Module)
+                .where(Module.id == module_id)
+                .options(selectinload(Module.section).selectinload(Section.course))
+            )
+        ).first()
 
         if not module:
             raise HTTPException(
@@ -454,7 +662,14 @@ class CourseService:
         session: AsyncSession,
         module_id: str,
     ):
-        module = await session.get(Module, module_id)
+        # ModuleReadMin doesn't need relationships, but keep section.course for permission checks
+        module = (
+            await session.exec(
+                select(Module)
+                .where(Module.id == module_id)
+                .options(selectinload(Module.section).selectinload(Section.course))
+            )
+        ).first()
 
         if not module:
             raise HTTPException(
@@ -467,7 +682,20 @@ class CourseService:
     async def get_full_module(
         session: AsyncSession, module_id: str, current_user: Account
     ):
-        module = await session.get(Module, module_id)
+        # Load module with content and attachments for ModuleRead
+        module = (
+            await session.exec(
+                select(Module)
+                .where(Module.id == module_id)
+                .options(
+                    selectinload(Module.section).selectinload(Section.course),
+                    selectinload(Module.video_content),
+                    selectinload(Module.document_content),
+                    selectinload(Module.attachments),
+                    selectinload(Module.quiz_content),
+                )
+            )
+        ).first()
 
         if not module:
             raise HTTPException(
@@ -520,7 +748,9 @@ class CourseService:
         session: AsyncSession, id: str, data: VideoContentUpdate, current_user: Account
     ):
 
-        video = await session.get(VideoContent, id)
+        video = (
+            await session.exec(select(VideoContent).where(VideoContent.id == id))
+        ).first()
 
         if not video:
             raise HTTPException(404, "video content does not exist")
@@ -546,7 +776,9 @@ class CourseService:
     @staticmethod
     async def delete_video(session: AsyncSession, id: str, current_user: Account):
 
-        video = await session.get(VideoContent, id)
+        video = (
+            await session.exec(select(VideoContent).where(VideoContent.id == id))
+        ).first()
 
         if not video:
             raise HTTPException(404, "video content does not exist")
@@ -590,7 +822,9 @@ class CourseService:
         current_user: Account,
     ):
 
-        doc = await session.get(DocumentContent, id)
+        doc = (
+            await session.exec(select(DocumentContent).where(DocumentContent.id == id))
+        ).first()
 
         if not doc:
             raise HTTPException(404, "document does not exist")
@@ -617,7 +851,9 @@ class CourseService:
     @staticmethod
     async def delete_document(session: AsyncSession, id: str, current_user: Account):
 
-        doc = await session.get(DocumentContent, id)
+        doc = (
+            await session.exec(select(DocumentContent).where(DocumentContent.id == id))
+        ).first()
 
         if not doc:
             raise HTTPException(404, "document does not exist")
@@ -654,11 +890,21 @@ class CourseService:
         current_user: Account,
     ):
 
-        attachment = await session.get(ModuleAttachment, attachment_id)
+        attachment = (
+            await session.exec(
+                select(ModuleAttachment)
+                .where(ModuleAttachment.id == attachment_id)
+                .options(
+                    selectinload(ModuleAttachment.module)
+                    .selectinload(Module.section)
+                    .selectinload(Section.course)
+                )
+            )
+        ).first()
         if not attachment:
             raise HTTPException(404, "attachment does not exist")
 
-        section = await session.get(Section, attachment.module.section_id)
+        section = attachment.module.section
 
         assert section is not None
 
@@ -711,7 +957,13 @@ class CourseService:
         current_user: Account,
     ):
 
-        course = await session.get(Course, data.course_id)
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == data.course_id)
+                .options(selectinload(Course.author).selectinload(Account.profile))
+            )
+        ).first()
 
         # TODO: before enrollment check for criteria like pay for paid courses
         # -
@@ -732,7 +984,13 @@ class CourseService:
         data: CourseRatingCreate,
         current_user: Account,
     ):
-        course = await session.get(Course, data.course_id)
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == data.course_id)
+                .options(selectinload(Course.author).selectinload(Account.profile))
+            )
+        ).first()
         if not course:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
@@ -803,10 +1061,18 @@ class CourseService:
             await session.exec(update_stmt)  # type: ignore
             await session.commit()
 
-            # Refresh to get updated values
-            await session.refresh(rating)
-            await session.refresh(course)
-
+            # Reload rating with account.profile and comment for CourseRatingRead
+            rating = (
+                await session.exec(
+                    select(Rating)
+                    .where(Rating.id == rating.id)
+                    .options(
+                        selectinload(Rating.account).selectinload(Account.profile),
+                    )
+                )
+            ).first()
+            if not rating:
+                raise HTTPException(404, "Rating not found after creation")
             return rating
 
         except Exception as e:
@@ -818,7 +1084,12 @@ class CourseService:
         course_id: str, session: AsyncSession, page: int = 1, per_page: int = PER_PAGE
     ):
 
-        query = select(Rating).join(Comment).where(Rating.course_id == course_id)
+        query = (
+            select(Rating)
+            .join(Comment)
+            .where(Rating.course_id == course_id)
+            .options(selectinload(Rating.account).selectinload(Account.profile))
+        )
 
         return await paginate(session, query, page, per_page)
 
@@ -828,7 +1099,13 @@ class CourseService:
         data: CourseCommentCreate,
         current_user: Account,
     ):
-        course = await session.get(Course, data.course_id)
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == data.course_id)
+                .options(selectinload(Course.author).selectinload(Account.profile))
+            )
+        ).first()
 
         if not course:
             raise HTTPException(
@@ -838,7 +1115,16 @@ class CourseService:
         comment_replied = None
 
         if data.reply_to_id:
-            comment_replied = await session.get(Comment, data.reply_to_id)
+            comment_replied = (
+                await session.exec(
+                    select(Comment)
+                    .where(Comment.id == data.reply_to_id)
+                    .options(
+                        selectinload(Comment.account).selectinload(Account.profile),
+                        selectinload(Comment.mention).selectinload(Account.profile),
+                    )
+                )
+            ).first()
 
             if not comment_replied:
                 raise HTTPException(
@@ -884,7 +1170,16 @@ class CourseService:
                 await session.flush()
 
                 # comment_count increment
-                upgraded_parent = await session.get(Comment, reply_to_id)
+                upgraded_parent = (
+                    await session.exec(
+                        select(Comment)
+                        .where(Comment.id == reply_to_id)
+                        .options(
+                            selectinload(Comment.account).selectinload(Account.profile),
+                            selectinload(Comment.mention).selectinload(Account.profile),
+                        )
+                    )
+                ).first()
                 assert upgraded_parent is not None
 
                 update_stmt_parent = (
@@ -908,7 +1203,24 @@ class CourseService:
 
             await session.exec(update_stmt)  # type: ignore
             await session.commit()
-            await session.refresh(comment)
+
+            # Reload comment with account.profile and mention.profile
+            comment = (
+                await session.exec(
+                    select(Comment)
+                    .where(Comment.id == comment.id)
+                    .options(
+                        selectinload(Comment.account).selectinload(Account.profile),
+                        selectinload(Comment.mention).selectinload(Account.profile),
+                        selectinload(Comment.reply_to)
+                        .selectinload(Comment.account)
+                        .selectinload(Account.profile),
+                    )
+                )
+            ).first()
+
+            if not comment:
+                raise HTTPException(404, "Comment not found after creation")
             return comment
         except Exception as e:
             await session.rollback()
@@ -921,7 +1233,16 @@ class CourseService:
         data: CourseCommentUpdate,
         current_user: Account,
     ):
-        comment = await session.get(Comment, id)
+        comment = (
+            await session.exec(
+                select(Comment)
+                .where(Comment.id == id)
+                .options(
+                    selectinload(Comment.account).selectinload(Account.profile),
+                    selectinload(Comment.mention).selectinload(Account.profile),
+                )
+            )
+        ).first()
 
         if not comment:
             raise HTTPException(
@@ -948,7 +1269,20 @@ class CourseService:
 
         session.add(comment)
         await session.commit()
-        await session.refresh(comment)
+
+        # Reload comment with account.profile and mention.profile
+        comment = (
+            await session.exec(
+                select(Comment)
+                .where(Comment.id == comment.id)
+                .options(
+                    selectinload(Comment.account).selectinload(Account.profile),
+                    selectinload(Comment.mention).selectinload(Account.profile),
+                )
+            )
+        ).first()
+        if not comment:
+            raise HTTPException(404, "Comment not found after update")
         return comment
 
     @staticmethod
@@ -967,6 +1301,10 @@ class CourseService:
                 Comment.reply_to == None,
             )
             .order_by(desc(Comment.created_at))
+            .options(
+                selectinload(Comment.account).selectinload(Account.profile),
+                selectinload(Comment.mention).selectinload(Account.profile),
+            )
         )
 
         data = await paginate(session, query, page, per_page)
@@ -1009,6 +1347,13 @@ class CourseService:
             select(Comment)
             .where(Comment.reply_to_id == comment_id)
             .order_by(desc(Comment.created_at))
+            .options(
+                selectinload(Comment.account).selectinload(Account.profile),
+                selectinload(Comment.mention).selectinload(Account.profile),
+                selectinload(Comment.reply_to)
+                .selectinload(Comment.account)
+                .selectinload(Account.profile),
+            )
         )
 
         data = await paginate(session, query, page, per_page)
@@ -1044,7 +1389,16 @@ class CourseService:
         comment_id: str, session: AsyncSession, current_user: Account
     ):
 
-        comment = await session.get(Comment, comment_id)
+        comment = (
+            await session.exec(
+                select(Comment)
+                .where(Comment.id == comment_id)
+                .options(
+                    selectinload(Comment.account).selectinload(Account.profile),
+                    selectinload(Comment.mention).selectinload(Account.profile),
+                )
+            )
+        ).first()
 
         if not comment:
             raise HTTPException(404, "comment not found!")
@@ -1095,7 +1449,10 @@ class CourseService:
     ):
         results = (
             await session.exec(
-                select(Module, Section).join(Section).where(Module.id == module_id)
+                select(Module, Section)
+                .join(Section)
+                .where(Module.id == module_id)
+                .options(selectinload(Section.course))
             )
         ).first()
 
@@ -1121,7 +1478,16 @@ class CourseService:
     async def _get_course_or_404(
         slug: str, session: AsyncSession, currentUser: Optional[Account] = None
     ):
-        course = (await session.exec(select(Course).where(Course.slug == slug))).first()
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.slug == slug)
+                .options(
+                    selectinload(Course.author).selectinload(Account.profile),
+                    selectinload(Course.tags),
+                )
+            )
+        ).first()
 
         if not course:
             raise HTTPException(status.HTTP_404_NOT_FOUND, "course not found")
@@ -1189,6 +1555,7 @@ class CourseService:
             return enrollment
         except Exception as e:
             await session.rollback()
+
             raise e
 
     @staticmethod
@@ -1236,6 +1603,17 @@ class CourseService:
         session: AsyncSession, course: Course, tag_names: list[str]
     ):
         """Create, reuse, or remove tags associated with a course."""
+        # Reload course with tags to ensure they're loaded
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == course.id)
+                .options(selectinload(Course.tags))
+            )
+        ).first()
+        if not course:
+            raise HTTPException(404, "Course not found")
+
         # Normalize tag names
         new_tags = {t.strip().lower() for t in tag_names if t.strip()}
         current_tags = {t.name for t in course.tags}

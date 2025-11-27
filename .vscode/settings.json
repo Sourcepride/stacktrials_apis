@@ -12,6 +12,6 @@
   "files.watcherExclude": {
     "**/venv/*/**": true,
   },
-  "python.languageServer": "Pylance",
+  "python.languageServer": "None",
   "cursorpyright.analysis.autoImportCompletions": true
 }

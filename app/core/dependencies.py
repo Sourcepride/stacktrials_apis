@@ -15,6 +15,8 @@ from fastapi import (
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import async_sessionmaker
+from sqlalchemy.orm import selectinload
+from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..models.user_model import Account
@@ -84,7 +86,13 @@ async def get_current_user(
     if not user_id:
         raise exception
 
-    user = await session.get(Account, user_id)
+    user = (
+        await session.exec(
+            select(Account)
+            .where(Account.id == user_id)
+            .options(selectinload(Account.profile))
+        )
+    ).first()
 
     if not user:
         raise exception
@@ -105,7 +113,13 @@ async def get_current_user_silent(
     if not user_id:
         return
 
-    user = await session.get(Account, user_id)
+    user = (
+        await session.exec(
+            select(Account)
+            .where(Account.id == user_id)
+            .options(selectinload(Account.profile))
+        )
+    ).first()
 
     if not user:
         return
@@ -141,7 +155,13 @@ async def get_current_user_ws(
     if not user_id:
         raise exception
 
-    user = await session.get(Account, user_id)
+    user = (
+        await session.exec(
+            select(Account)
+            .where(Account.id == user_id)
+            .options(selectinload(Account.profile))
+        )
+    ).first()
 
     if not user:
         raise exception

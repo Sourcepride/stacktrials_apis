@@ -36,8 +36,13 @@ class Rating(AppBaseModelMixin, RatingBase, table=True):
     )
 
     course: Optional["Course"] = Relationship(back_populates="ratings")
-    account: "Account" = Relationship(back_populates="ratings")
-    comment: Optional["Comment"] = Relationship(back_populates="rating")
+    account: "Account" = Relationship(
+        back_populates="ratings",
+        sa_relationship_kwargs={"lazy": "selectin"},
+    )
+    comment: Optional["Comment"] = Relationship(
+        back_populates="rating", sa_relationship_kwargs={"lazy": "selectin"}
+    )
 
     # unique constraint
     class Config:
@@ -73,11 +78,17 @@ class Comment(AppBaseModelMixin, CommentBase, table=True):
 
     account: "Account" = Relationship(
         back_populates="comments",
-        sa_relationship_kwargs={"foreign_keys": "[Comment.creator_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[Comment.creator_id]",
+            "lazy": "selectin",
+        },
     )
     mention: Optional["Account"] = Relationship(
         back_populates="mentions",
-        sa_relationship_kwargs={"foreign_keys": "[Comment.mention_id]"},
+        sa_relationship_kwargs={
+            "foreign_keys": "[Comment.mention_id]",
+            "lazy": "selectin",
+        },
     )
     course: "Course" = Relationship(back_populates="comments")
 

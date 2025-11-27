@@ -1,5 +1,6 @@
 from fastapi import HTTPException, status
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy.orm import selectinload
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -8,10 +9,19 @@ from app.schemas.account import ProfileInformation, ProfileUpdate
 
 
 async def my_account(session: AsyncSession, current_user: Account):
+    # Reload account with profile to ensure it's available
+    account = (
+        await session.exec(
+            select(Account)
+            .where(Account.id == current_user.id)
+            .options(selectinload(Account.profile))
+        )
+    ).first()
+    
+    if not account:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Account not found")
 
-    await session.refresh(current_user)
-
-    return current_user
+    return account
 
 
 async def get_profile(u: str, session: AsyncSession):
