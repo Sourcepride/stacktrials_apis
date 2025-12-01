@@ -14,6 +14,7 @@ from app.common.enum import (
     CourseStatus,
     DifficultyLevel,
     DocumentPlatform,
+    EnrollmentStatus,
     EnrollmentType,
     MediaType,
     ModuleProgressStatus,
@@ -37,7 +38,7 @@ from app.models.courses_model import (
     Tag,
     VideoContent,
 )
-from app.models.user_model import Account
+from app.models.user_model import Account, Profile
 from app.modules import course
 from app.modules.media.router import validate_document_url
 from app.modules.media.service import URLValidator
@@ -1383,6 +1384,86 @@ class CourseService:
             data["items"] = list(map(_fill, data["items"]))
 
         return data
+
+    @staticmethod
+    async def list_enrolled(
+        session: AsyncSession,
+        course_id: str,
+        current_user: Account,
+        q: str | None = None,
+        page: int = 1,
+        per_page: int = PER_PAGE,
+    ):
+        """
+        List enrolled students for a course.
+        Only accessible by course creator or actively enrolled students.
+        """
+        # Get the course
+        course = (
+            await session.exec(
+                select(Course)
+                .where(Course.id == course_id)
+                .options(selectinload(Course.author).selectinload(Account.profile))
+            )
+        ).first()
+
+        if not course:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="course not found"
+            )
+
+        # Check if user is the creator
+        is_creator = course.account_id == current_user.id
+
+        # Check if user is actively enrolled
+        enrollment = (
+            await session.exec(
+                select(CourseEnrollment).where(
+                    CourseEnrollment.course_id == course.id,
+                    CourseEnrollment.account_id == current_user.id,
+                    CourseEnrollment.status == EnrollmentStatus.ACTIVE,
+                )
+            )
+        ).first()
+
+        is_enrolled = enrollment is not None
+
+        # Permission check: must be creator or actively enrolled
+        if not is_creator and not is_enrolled:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You must be the course creator or an actively enrolled student to view enrolled students",
+            )
+
+        # Build query for enrolled students
+
+        base_query = (
+            select(CourseEnrollment)
+            .join(Account, CourseEnrollment.account_id == Account.id)
+            .outerjoin(Profile, Account.id == Profile.account_id)
+            .where(CourseEnrollment.course_id == course.id)
+            .options(
+                selectinload(CourseEnrollment.account).selectinload(Account.profile)
+            )
+        )
+
+        # Apply search filter if provided
+        if q:
+
+            search_pattern = f"%{q.lower()}%"
+            # Search in account email, username, and profile display_name
+            base_query = base_query.where(
+                or_(
+                    func.lower(Account.email).like(search_pattern),
+                    func.lower(Account.username).like(search_pattern),
+                    func.lower(Profile.display_name).like(search_pattern),
+                )
+            )
+
+        # Order by enrollment date (most recent first)
+        base_query = base_query.order_by(desc(CourseEnrollment.enrollment_date))
+
+        return await paginate(session, base_query, page, per_page)
 
     @staticmethod
     async def like_unlike(

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 from xmlrpc.client import boolean
 
 from pydantic import BaseModel
@@ -37,3 +38,10 @@ class ContactForm(BaseModel):
 class ContactFormResponse(BaseModel):
     success: boolean
     message: str
+
+
+class CursorPaginationSchema(BaseModel):
+
+    last_message_id: Optional[str] = None
+    recent_message_id: Optional[str] = None
+    has_next: bool

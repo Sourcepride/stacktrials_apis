@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, field_validator, validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, validator
 
 from app.common.enum import ModuleType, ProgressionType
 from app.models.comments_model import CommentBase, RatingBase
@@ -28,6 +28,8 @@ from app.schemas.base import PaginatedSchema
 class AccountRead(AccountBase):
     id: uuid.UUID
     profile: Optional["ProfileBase"] = None
+    # Override email field to exclude it from serialization for security
+    email: str = Field(exclude=True, repr=False)
 
 
 class CourseRead(CourseBase):
@@ -179,11 +181,16 @@ class CourseEnrollmentRead(CourseEnrollmentBase):
     course_id: str
     completion_date: Optional[datetime]
     progress_percentage: float
+    account: "AccountRead"
 
 
 class CourseEnrollmentCreate(CourseEnrollmentBase):
     account_id: uuid.UUID
     course_id: str
+
+
+class PaginatedCourseEnrollment(PaginatedSchema):
+    items: list[CourseEnrollmentRead]
 
 
 class CourseRatingRead(RatingBase):

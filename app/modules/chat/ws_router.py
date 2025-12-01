@@ -107,7 +107,11 @@ async def connect_to_chat(
                 )
             elif event == "chat.message.update":
                 resp = await websocket_error_wrapper(
-                    ChatService.update_chat, session, current_user, chat_id, data
+                    ChatService.update_message,
+                    session,
+                    current_user,
+                    data.get("message_id"),
+                    data,
                 )
                 model = ChatMessageRead.model_validate(resp)
                 await manager.publish(
@@ -166,10 +170,12 @@ async def connect_to_chat(
                 chat_id,
                 {
                     "event": "chat.stat",
-                    "data": await ChatService.fetch_one_unread_stats(
-                        session, chat_id, current_user.id
-                    ),
-                    "chat_id": chat_id,
+                    "data": {
+                        **await ChatService.fetch_one_unread_stats(
+                            session, chat_id, current_user.id
+                        ),
+                        "chat_id": chat_id,
+                    },
                 },
             )
 

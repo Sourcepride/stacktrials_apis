@@ -13,9 +13,11 @@ from app.common.enum import ChatType, GroupChatPrivacy, MemberRole, MemberStatus
 from app.common.utils import (
     CursorPaginationSerializer,
     generate_base_64_encoded_uuid,
+    notification_ws_channel,
     paginate,
     ws_code_from_http_code,
 )
+from app.common.ws_manager import manager
 from app.i18n import translation
 from app.models.chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
 from app.models.courses_model import Course, CourseEnrollment
@@ -24,6 +26,8 @@ from app.models.user_model import Account, Profile
 from app.modules.notification.service import NotificationService
 from app.schemas.annotations import ChatMessage
 from app.schemas.chat import (
+    ChatInviteBulkWrite,
+    ChatInviteEmailWrite,
     ChatInviteWrite,
     ChatMessageReactionWrite,
     ChatMessageRead,
@@ -715,6 +719,17 @@ class ChatService:
         if not chat:
             raise HTTPException(404, "Chat not found")
 
+        # Handle email-based invites: if no invited_account_id but email matches, attach account
+        if not invite.invited_account_id and invite.email:
+            if invite.email.lower() != current_user.email.lower():
+                raise HTTPException(
+                    403, "This invite was sent to a different email address"
+                )
+            # Attach the account to the invite
+            invite.invited_account_id = current_user.id
+            session.add(invite)
+            await session.flush()
+
         # check targeted invite
         if invite.invited_account_id and invite.invited_account_id != current_user.id:
             raise HTTPException(403, "This invite is not for you")
@@ -772,21 +787,33 @@ class ChatService:
         session: AsyncSession,
         current_user: Account,
         bgTask: BackgroundTasks,
-        data: ChatInviteWrite,
+        data: ChatInviteBulkWrite,
         lang: Optional[str] = None,
     ):
         """
-        Create an invite.
-        - chat must exist
+        Create multiple invites in bulk.
+        - All invites must be for the same chat
         - current_user must be a member
-        - if invited_account_id is provided → targeted invite
-        - send notification (placeholder)
+        - Only admin/creator can invite
+        - Validates all target accounts exist before creating any invites
+        - Batch creates invites and sends notifications
         """
-        chat = await session.get(Chat, data.chat_id)
+        if not data.data:
+            raise HTTPException(400, "At least one invite is required")
+
+        # Get unique chat_ids from the invites
+        chat_ids = {invite.chat_id for invite in data.data}
+        if len(chat_ids) > 1:
+            raise HTTPException(
+                400, "All invites must be for the same chat in a single request"
+            )
+
+        chat_id = chat_ids.pop()
+        chat = await session.get(Chat, chat_id)
         if not chat:
             raise HTTPException(404, "Chat not found")
 
-        # check membership
+        # Check membership and permissions once
         member = (
             await session.exec(
                 select(ChatMember)
@@ -801,19 +828,176 @@ class ChatService:
         if member.role != MemberRole.ADMIN and not member.is_creator:
             raise HTTPException(403, "Permission denied, only admin can invite")
 
-        target_account = await session.get(Account, data.invited_account_id)
-        if not target_account:
-            raise HTTPException(404, "Invited account not found")
+        # Collect all unique target account IDs
+        target_account_ids = {invite.invited_account_id for invite in data.data}
 
-        cleaned_data = data.model_dump()
+        # Validate all target accounts exist in a single query
+        target_accounts_result = await session.exec(
+            select(Account)
+            .where(Account.id.in_(target_account_ids))
+            .options(selectinload(Account.profile))
+        )
+        target_accounts = {acc.id: acc for acc in target_accounts_result.all()}
 
-        invite = ChatInvite(
-            **cleaned_data,
-            invited_by_id=member.id,
-            is_active=True,
+        # Check if all accounts exist
+        missing_accounts = target_account_ids - set(target_accounts.keys())
+        if missing_accounts:
+            raise HTTPException(
+                404,
+                f"Invited account(s) not found: {', '.join(str(id) for id in missing_accounts)}",
+            )
+
+        # Batch create all invites
+        invites = []
+        invite_codes = []
+        for invite_data in data.data:
+            cleaned_data = invite_data.model_dump(exclude={"invite_code"})
+            invite_code = generate_base_64_encoded_uuid()
+            invite_codes.append(invite_code)
+
+            invite = ChatInvite(
+                **cleaned_data,
+                invited_by_id=member.id,
+                invite_code=invite_code,
+            )
+            invites.append(invite)
+            session.add(invite)
+
+        await session.flush()  # Get IDs without committing
+
+        # Reload all invites with relationships in a single query
+        invite_ids = [invite.id for invite in invites]
+        created_invites = (
+            await session.exec(
+                select(ChatInvite)
+                .where(ChatInvite.id.in_(invite_ids))
+                .options(
+                    selectinload(ChatInvite.invited_by)
+                    .selectinload(ChatMember.account)
+                    .selectinload(Account.profile),
+                    selectinload(ChatInvite.invited_account).selectinload(
+                        Account.profile
+                    ),
+                )
+            )
+        ).all()
+
+        await session.commit()
+
+        # Batch send notifications and emails
+        inviter_name = (
+            current_user.profile.display_name or current_user.username
+            if current_user.profile
+            else current_user.username
         )
 
-        invite.invite_code = generate_base_64_encoded_uuid()
+        # Create notifications and email tasks for all invites
+        for invite in created_invites:
+            target_account = target_accounts.get(invite.invited_account_id)
+            if not target_account:
+                continue
+
+            trans = translation(target_account.profile.language)
+
+            # Create notification for the target account (not current_user)
+            notification_data = NotificationWrite(
+                title=trans.t("chat_invite.title"),
+                message=trans.t(
+                    "chat_invite.message",
+                    inviter=current_user.username,
+                ),
+                type=NotificationType.INVITE,
+                ref_id=str(invite.id),
+                ref_model="ChatInvite",
+            )
+            cleaned_notification = notification_data.model_dump()
+            notification = Notification(**cleaned_notification)
+            notification.account_id = target_account.id  # Notify the target account
+
+            session.add(notification)
+            await session.flush()
+
+            # Publish notification via WebSocket
+            key = notification_ws_channel(target_account)
+            await manager.publish(
+                key,
+                {
+                    "event": "notification.create",
+                    "data": notification.model_dump_json(),
+                },
+            )
+
+            # Queue email
+            await send_email(
+                bgTask,
+                [target_account.email],
+                "Chat Invitation",
+                "chat.html",
+                {
+                    "logo_url": BASE_URL + "/static/black-logo.png",
+                    "name": inviter_name,
+                    "chat": chat.name or "Chat",
+                    "year": datetime.now(timezone.utc).year,
+                },
+            )
+
+        await session.commit()
+
+        return {"ok": True}
+
+    @staticmethod
+    async def create_invite_by_email(
+        session: AsyncSession,
+        current_user: Account,
+        bgTask: BackgroundTasks,
+        data: ChatInviteEmailWrite,
+        lang: Optional[str] = None,
+    ):
+        """
+        Create an invite by email (for users who don't have an account yet).
+        - chat must exist
+        - current_user must be a member and admin/creator
+        - email is required
+        - creates invite with email but no invited_account_id
+        - sends email to the invited user with invite link
+        """
+        chat = await session.get(Chat, data.chat_id)
+        if not chat:
+            raise HTTPException(404, "Chat not found")
+
+        # Check membership and permissions
+        member = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat.id)
+                .where(ChatMember.account_id == current_user.id)
+                .options(selectinload(ChatMember.account).selectinload(Account.profile))
+            )
+        ).first()
+        if not member:
+            raise HTTPException(403, "You must be a member to create invites")
+
+        if member.role != MemberRole.ADMIN and not member.is_creator:
+            raise HTTPException(403, "Permission denied, only admin can invite")
+
+        existing_account = (
+            await session.exec(
+                select(Account).where(
+                    func.lower(Account.email) == func.lower(data.email)
+                )
+            )
+        ).first()
+
+        invite = ChatInvite(
+            chat_id=data.chat_id,
+            email=data.email,
+            invited_by_id=member.id,
+            is_active=True,
+            invite_code=generate_base_64_encoded_uuid(),
+            max_uses=data.max_uses,
+            expires_at=data.expires_at,
+            invited_account_id=existing_account.id if existing_account else None,
+        )
 
         session.add(invite)
         await session.commit()
@@ -837,33 +1021,26 @@ class ChatService:
             raise HTTPException(404, "Invite not found after creation")
 
         trans = translation(lang)
-
-        await NotificationService.create_notification(
-            session,
-            current_user,
-            NotificationWrite(
-                title=trans.t("chat_invite.title"),
-                message=trans.t(
-                    "chat_invite.message",
-                    inviter=current_user.username,
-                ),
-                type=NotificationType.INVITE,
-            ),
+        inviter_name = (
+            current_user.profile.display_name or current_user.username
+            if current_user.profile
+            else current_user.username
         )
 
+        # Build invite acceptance URL
+        invite_url = f"{BASE_URL}/chat/invite/accept/{invite.invite_code}"
+
+        # Send email with invite link
         await send_email(
             bgTask,
-            [target_account.email],
+            [data.email],
             "Chat Invitation",
             "chat.html",
             {
                 "logo_url": BASE_URL + "/static/black-logo.png",
-                "name": (
-                    current_user.profile.display_name or current_user.username
-                    if current_user.profile
-                    else member.account.username
-                ),
-                "chat": chat.name,
+                "name": inviter_name,
+                "chat": chat.name or "Chat",
+                "invite_url": invite_url,
                 "year": datetime.now(timezone.utc).year,
             },
         )
