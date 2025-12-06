@@ -184,8 +184,9 @@ async def websocket_error_wrapper(
     async_func: Callable[..., Awaitable[Any]], *args, **kwargs
 ):
     try:
-        return await async_func()
+        return await async_func(*args, **kwargs)
     except Exception as e:
+        print("--websocket_error_wrapper -----", e)
         if isinstance(e, HTTPException):
             raise WebSocketException(ws_code_from_http_code(e.status_code), e.detail)
         raise WebSocketException(
@@ -206,8 +207,8 @@ class CursorPaginationSerializer:
         hasNext: bool,
     ) -> None:
         self.items = items
-        self.last_message_id = last_message_id
-        self.recent_message_id = recent_message_id
+        self.last_message_id = str(last_message_id)
+        self.recent_message_id = str(recent_message_id)
         self.hasNext = hasNext
 
     def __call__(self) -> dict[str, Any]:
@@ -215,7 +216,7 @@ class CursorPaginationSerializer:
             "items": self.items,
             "last_message_id": self.last_message_id,
             "recent_message_id": self.recent_message_id,
-            "hasNext": self.hasNext,
+            "has_next": self.hasNext,
         }
 
 

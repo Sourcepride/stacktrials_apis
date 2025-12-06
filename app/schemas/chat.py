@@ -48,9 +48,10 @@ class ChatMemberRead(ChatMemberBase):
     chat_id: uuid.UUID
     account_id: uuid.UUID
     last_read_message_id: Optional[uuid.UUID] = None
-    is_admin: bool
     is_creator: bool
     account: AccountRead
+    created_at: datetime
+    updated_at: datetime
 
 
 class ChatMessageReactionRead(MessageReactionBase):
@@ -72,6 +73,8 @@ class ChatMessageRead(MessageBase):
     # replies: list[MessageBase] = None
     reactions: list[ChatMessageReactionRead] = []
     model_config = ConfigDict(from_attributes=True)  # type: ignore
+    created_at: datetime
+    updated_at: datetime
 
 
 class ChatMessageReadFromAttrs(ChatMemberRead):
@@ -83,6 +86,7 @@ class ChatAndUnReadCount(BaseModel):
     chat: ChatRead
     unread_count: int
     has_reply: bool
+    last_message: Optional[ChatMessageRead] = None
 
 
 class PaginatedChatResp(PaginatedSchema):
@@ -151,5 +155,13 @@ class PaginatedChatRead(PaginatedSchema):
     items: list[ChatRead]
 
 
+class PaginatedChatReadWithUnReadCount(PaginatedSchema):
+    items: list[ChatAndUnReadCount]
+
+
 class PaginatedChatInviteRead(PaginatedSchema):
     items: list[ChatInviteRead]
+
+
+class PaginatedChatMemberRead(PaginatedSchema):
+    items: list[ChatMemberRead]

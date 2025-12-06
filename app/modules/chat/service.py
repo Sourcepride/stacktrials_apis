@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -65,7 +66,9 @@ class ChatService:
         cursor_type: Optional[str] = None,
         limit: int = PER_PAGE,
     ):
-        await ChatService.get_chat_or_raise(chat_id, str(current_user.id), session)
+        await ChatService.get_chat_and_membership_or_raise(
+            chat_id, str(current_user.id), session
+        )
         query = (
             select(Message)
             .where(Message.chat_id == chat_id, Message.is_deleted == False)
@@ -88,7 +91,6 @@ class ChatService:
                 .selectinload(Course.tags),
             )
         )
-
         # total_messages = (
         #     await session.exec(select(func.count()).select_from(query.froms[0]))
         # ).one()
@@ -106,9 +108,15 @@ class ChatService:
         if q:
             query = query.where(col(Message.content).ilike(f"%{q}%"))
 
-        query = query.order_by(desc(Message.created_at)).limit(limit)
+        query = query.order_by(Message.created_at).limit(limit)
+
         messages = (await session.exec(query)).all()
+
+        if not messages:
+            return CursorPaginationSerializer(messages, None, None, False)()
+
         last_message = messages[len(messages) - 1]
+
         hasNext = bool(
             (
                 await session.exec(
@@ -118,8 +126,8 @@ class ChatService:
         )  # even if it is one message then there is a valid next
 
         return CursorPaginationSerializer(
-            messages, messages[len(messages) - 1].id, messages[0].id, hasNext
-        )
+            messages, last_message.id, messages[0].id, hasNext
+        )()
 
     @staticmethod
     async def list_chat(
@@ -175,7 +183,7 @@ class ChatService:
             # (Matches Chat Name) OR (Matches Member Name AND is Direct Chat)
             query = query.where(or_(text_filters, col(Chat.id).in_(member_subquery)))
 
-        query.order_by(desc(Chat.last_message_at))
+        query = query.order_by(desc(Chat.last_message_at))
 
         res = await paginate(session, query, page, per_page)
         items = res["items"]
@@ -183,14 +191,38 @@ class ChatService:
 
         unread_map = await ChatService.fetch_unread_stats(session, ids, current_user.id)
 
+        # Fetch last message for each chat using PostgreSQL's DISTINCT ON
+        last_messages_query = (
+            select(Message)
+            .where(Message.chat_id.in_(ids))
+            .options(
+                selectinload(Message.sender)
+                .selectinload(ChatMember.account)
+                .selectinload(Account.profile),
+                selectinload(Message.reactions)
+                .selectinload(MessageReaction.account)
+                .selectinload(Account.profile),
+            )
+            .order_by(Message.chat_id, desc(Message.created_at))
+            .distinct(Message.chat_id)
+        )
+
+        last_messages = (await session.exec(last_messages_query)).all()
+
+        # Create a map of chat_id -> last_message
+        last_message_map = {msg.chat_id: msg for msg in last_messages}
+
         modified_res = []
         for item in items:
             stats = unread_map.get(item.id, {"unread_count": 0, "has_reply": False})
+            last_message = last_message_map.get(item.id)
+
             modified_res.append(
                 {
                     "chat": item,
                     "unread_count": stats["unread_count"],
                     "has_reply": stats["has_reply"],
+                    "last_message": last_message,
                 }
             )
         res["items"] = modified_res
@@ -321,20 +353,9 @@ class ChatService:
     async def update_chat(
         session: AsyncSession, current_user: Account, chat_id: str, data: ChatUpdate
     ):
-        chat = await ChatService.get_chat_or_raise(
+        chat, member = await ChatService.get_chat_and_membership_or_raise(
             str(chat_id), str(current_user.id), session
         )
-
-        member = (
-            await session.exec(
-                select(ChatMember).where(
-                    ChatMember.account_id == current_user.id,
-                    ChatMember.chat_id == chat.id,
-                )
-            )
-        ).first()
-
-        assert member is not None
 
         if member.status != MemberRole.ADMIN and not member.is_creator:
             raise HTTPException(403, "permission denied")
@@ -365,20 +386,9 @@ class ChatService:
     async def make_admin(
         session: AsyncSession, current_user: Account, chat_id: str, member_id: str
     ):
-        chat = await ChatService.get_chat_or_raise(
+        chat, current_member = await ChatService.get_chat_and_membership_or_raise(
             str(chat_id), str(current_user.id), session
         )
-
-        current_member = (
-            await session.exec(
-                select(ChatMember).where(
-                    ChatMember.account_id == current_user.id,
-                    ChatMember.chat_id == chat.id,
-                )
-            )
-        ).first()
-
-        assert current_member is not None
 
         if current_member.status != MemberRole.ADMIN and not current_member.is_creator:
             raise HTTPException(403, "permission denied")
@@ -409,20 +419,9 @@ class ChatService:
     async def remove_admin(
         session: AsyncSession, current_user: Account, chat_id: str, member_id: str
     ):
-        chat = await ChatService.get_chat_or_raise(
+        chat, current_member = await ChatService.get_chat_and_membership_or_raise(
             str(chat_id), str(current_user.id), session
         )
-
-        current_member = (
-            await session.exec(
-                select(ChatMember).where(
-                    ChatMember.account_id == current_user.id,
-                    ChatMember.chat_id == chat.id,
-                )
-            )
-        ).first()
-
-        assert current_member is not None
 
         if current_member.status != MemberRole.ADMIN and not current_member.is_creator:
             raise HTTPException(403, "permission denied")
@@ -453,12 +452,13 @@ class ChatService:
     async def create_message(
         session: AsyncSession, current_user: Account, data: ChatMessageWrite
     ):
-        chat = await ChatService.get_chat_or_raise(
+
+        chat, current_member = await ChatService.get_chat_and_membership_or_raise(
             str(data.chat_id), str(current_user.id), session
         )
 
         cleaned_data = data.model_dump()
-        message = Message(**cleaned_data, sender_id=current_user.id)
+        message = Message(**cleaned_data, sender_id=current_member.id)
         session.add(message)
         await session.flush()
 
@@ -495,6 +495,7 @@ class ChatService:
                 )
             )
         ).first()
+
         return message
 
     @staticmethod
@@ -508,9 +509,10 @@ class ChatService:
         message = (
             await session.exec(
                 select(Message)
+                .join(ChatMember, Message.sender_id == ChatMember.id)
                 .where(
                     Message.id == message_id,
-                    Message.sender_id == current_user.id,
+                    ChatMember.account_id == current_user.id,
                 )
                 .options(
                     selectinload(Message.sender)
@@ -542,6 +544,7 @@ class ChatService:
         cleaned_data = data.model_dump()
         message.sqlmodel_update(cleaned_data)
         message.is_edited = True
+        message.edited_at = datetime.now(tz=timezone.utc)
 
         session.add(message)
         await session.commit()
@@ -580,9 +583,10 @@ class ChatService:
         message = (
             await session.exec(
                 select(Message)
+                .join(ChatMember, Message.sender_id == ChatMember.id)
                 .where(
                     Message.id == message_id,
-                    Message.sender_id == current_user.id,
+                    ChatMember.account_id == current_user.id,
                 )
                 .options(
                     selectinload(Message.sender)
@@ -612,6 +616,7 @@ class ChatService:
             raise HTTPException(403, "Invalid operation")
 
         message.is_deleted = True
+        message.deleted_at = datetime.now(tz=timezone.utc)
         session.add(message)
         await session.commit()
 
@@ -1230,7 +1235,7 @@ class ChatService:
         if not message:
             raise HTTPException(404, "message not found")
 
-        await ChatService.get_chat_or_raise(
+        await ChatService.get_chat_and_membership_or_raise(
             str(message.chat_id), str(current_user.id), session
         )
 
@@ -1266,38 +1271,24 @@ class ChatService:
         Return unread_count + has_reply for a single chat_id
         """
 
-        # Get the last_read timestamp subquery
-        last_read_ts_subq = (
+        # Subquery to get the last read message timestamp for this specific user/chat
+        last_read_subq = (
             select(Message.created_at)
-            .where(Message.id == ChatMember.last_read_message_id)
+            .join(ChatMember, Message.id == ChatMember.last_read_message_id)
+            .where(ChatMember.chat_id == chat_id, ChatMember.account_id == user_id)
             .scalar_subquery()
         )
 
-        unread_subq = (
-            select(
-                func.count(col(Message.id)).label("unread_count"),
-                func.bool_or(col(Message.reply_to_id).isnot(None)).label("has_reply"),
-            )
-            .select_from(Message)
-            .join(ChatMember, ChatMember.chat_id == Message.chat_id)  # type: ignore
-            .where(
-                ChatMember.account_id == user_id,
-                Message.chat_id == chat_id,
-                # If last_read_message_id is NULL → count all
-                or_(
-                    col(ChatMember.last_read_message_id).is_(None),
-                    Message.created_at > last_read_ts_subq,
-                ),
-            )
-            .subquery()
+        # Main query to count unread messages
+        query = select(
+            func.count(Message.id).label("unread_count"),
+            func.bool_or(Message.reply_to_id.isnot(None)).label("has_reply"),
+        ).where(
+            Message.chat_id == chat_id,
+            or_(last_read_subq.is_(None), Message.created_at > last_read_subq),
         )
 
-        result = await session.exec(
-            select(
-                unread_subq.c.unread_count,
-                unread_subq.c.has_reply,
-            )
-        )
+        result = await session.exec(query)
         row: Any = result.one_or_none()
 
         return {
@@ -1320,13 +1311,13 @@ class ChatService:
             .join(ChatMember, ChatMember.chat_id == Message.chat_id)  # type: ignore
             .where(
                 ChatMember.account_id == user_id,
-                (
+                or_(
+                    ChatMember.last_read_message_id.is_(None),
                     Message.created_at
                     > select(Message.created_at)
                     .where(Message.id == ChatMember.last_read_message_id)
-                    .scalar_subquery()
-                    if col(ChatMember.last_read_message_id).isnot(None)
-                    else True
+                    .correlate(ChatMember)
+                    .scalar_subquery(),
                 ),  # If no last_read, count all messages
             )
             .where(col(Message.chat_id).in_(chat_ids))
@@ -1354,12 +1345,43 @@ class ChatService:
         }
 
     @staticmethod
-    async def get_chat_or_raise(
+    async def list_members(
+        session: AsyncSession,
+        current_user: Account,
+        chat_id: str,
+        page: int = 1,
+        per_page: int = 100,
+    ):
+        """
+        Get paginated list of active members for a chat.
+        - Verifies chat exists and current user is a member
+        - Returns only active members (status == ACTIVE)
+        """
+        # Verify chat exists and user is a member
+        await ChatService.get_chat_and_membership_or_raise(
+            chat_id, str(current_user.id), session
+        )
+
+        # Query for active members
+        query = (
+            select(ChatMember)
+            .where(
+                ChatMember.chat_id == chat_id,
+                ChatMember.status == MemberStatus.ACTIVE,
+            )
+            .options(selectinload(ChatMember.account).selectinload(Account.profile))
+            .order_by(ChatMember.joined_at)
+        )
+
+        return await paginate(session, query, page, per_page)
+
+    @staticmethod
+    async def get_chat_and_membership_or_raise(
         chat_id: str, account_id: str, session: AsyncSession
-    ) -> Chat:
-        chat = (
+    ) -> tuple[Chat, ChatMember]:
+        chat, member = (
             await session.exec(
-                select(Chat)
+                select(Chat, ChatMember)
                 .join(ChatMember)
                 .where(Chat.id == chat_id, ChatMember.account_id == account_id)
                 .options(
@@ -1372,6 +1394,7 @@ class ChatService:
             )
         ).first()
         if not chat:
+
             raise HTTPException(403, "you are not a member of this chat")
 
-        return chat
+        return chat, member

@@ -18,7 +18,9 @@ from app.schemas.chat import (
     ChatRead,
     ChatWrite,
     PaginatedChatInviteRead,
+    PaginatedChatMemberRead,
     PaginatedChatRead,
+    PaginatedChatReadWithUnReadCount,
     PaginatedMessages,
 )
 
@@ -38,7 +40,7 @@ async def create_chat(
     return resp
 
 
-@router.get("/", response_model=PaginatedChatRead)
+@router.get("/", response_model=PaginatedChatReadWithUnReadCount)
 async def list_chats(
     session: SessionDep,
     current_user: CurrentActiveUser,
@@ -121,6 +123,16 @@ async def list_messages(
     return await ChatService.list_messages(
         chat_id, session, current_user, q, message_id, type_
     )
+
+
+@router.get("/{chat_id}/members", response_model=PaginatedChatMemberRead)
+async def list_members(
+    chat_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+    page: int = 1,
+):
+    return await ChatService.list_members(session, current_user, chat_id, page)
 
 
 @router.patch("/{chat_id}/make-admin/{member_id}", response_model=ChatMemberRead)
