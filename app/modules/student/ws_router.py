@@ -132,6 +132,16 @@ async def annotation_ws(
                     await redis.publish(doc_channel(doc_id), json.dumps(payload))
 
     except WebSocketDisconnect:
-        await manager.disconnect(doc_id, websocket)
+        # Clean up with timeout protection
+        try:
+            await asyncio.wait_for(manager.disconnect(doc_id, websocket), timeout=2.0)
+        except Exception:
+            pass  # Cleanup failed, but don't block
     finally:
+        # Cancel the listener task
         listener_task.cancel()
+        # Wait for it to finish with timeout
+        try:
+            await asyncio.wait_for(listener_task, timeout=2.0)
+        except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+            pass  # Task cleanup, ignore errors

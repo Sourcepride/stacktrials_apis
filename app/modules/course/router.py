@@ -33,6 +33,7 @@ from app.schemas.courses import (
     ModuleUpdate,
     PaginatedComments,
     PaginatedCourse,
+    PaginatedCourseEnrollment,
     PaginatedRatings,
     SectionContentReadFull,
     SectionCreate,
@@ -300,6 +301,20 @@ async def update_comment(
     current_user: CurrentActiveUser,
 ):
     return await CourseService.update_comment(session, id, data, current_user)
+
+
+@router.get("/{course_id}/enrolled", response_model=PaginatedCourseEnrollment)
+async def list_enrolled(
+    course_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+    q: Annotated[str | None, Query()] = None,
+    page: Annotated[int | None, Query()] = None,
+):
+
+    return await CourseService.list_enrolled(
+        session, course_id, current_user, q, page or 1
+    )
 
 
 @router.get("/{course_id}/enroll", response_model=CourseEnrollmentRead)

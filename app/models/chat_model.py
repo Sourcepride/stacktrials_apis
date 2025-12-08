@@ -30,7 +30,8 @@ class ChatBase(AppSQLModel):
     )  # Only for group chats
     is_active: bool = Field(default=True)
     last_message_at: datetime = Field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
+        default_factory=lambda: datetime.now(tz=timezone.utc),
+        sa_type=DateTime(timezone=True),
     )
 
 
@@ -74,7 +75,10 @@ class Chat(AppBaseModelMixin, ChatBase, table=True):
 class ChatMemberBase(AppSQLModel):
     role: MemberRole = Field(default=MemberRole.MEMBER)
     status: MemberStatus = Field(default=MemberStatus.ACTIVE)
-    joined_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    joined_at: datetime = Field(
+        default_factory=lambda: datetime.now(tz=timezone.utc),
+        sa_type=DateTime(timezone=True),
+    )
     left_at: Optional[datetime] = Field(
         default=None,
         sa_column=Column(
@@ -253,6 +257,7 @@ class ChatInviteBase(AppSQLModel):
     invite_code: Optional[str] = Field(
         max_length=50, unique=True, index=True, default=None
     )  # Public invite link
+    email: Optional[str] = Field(default=None)
     max_uses: Optional[int] = Field(default=None, ge=1)  # Limit uses for invite code
     current_uses: int = Field(default=0, ge=0)
     expires_at: Optional[datetime] = Field(

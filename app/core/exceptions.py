@@ -3,7 +3,10 @@ import json
 import logging
 import logging.config
 import os
+from ast import Is
 from pathlib import Path
+
+from app.common.constants import IS_DEV
 
 
 def expand_env(obj):
@@ -28,6 +31,26 @@ def expand_env(obj):
 
 
 def setup_logger():
+    if IS_DEV:
+        # In dev mode, use simple console logger (not JSON formatted)
+        logger = logging.getLogger("app")
+        logger.setLevel(logging.DEBUG)
+
+        # Remove existing handlers to avoid duplicates
+        logger.handlers.clear()
+
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.DEBUG)
+        formatter = logging.Formatter(
+            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        )
+        handler.setFormatter(formatter)
+
+        logger.addHandler(handler)
+        logger.propagate = False  # Prevent duplicate logs
+
+        return logger
+
     try:
         config_path = Path(__file__).resolve().parent.parent.parent / "logging.json"
         with open(config_path) as f:

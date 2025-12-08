@@ -1,3 +1,4 @@
+import asyncio
 from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -31,19 +32,35 @@ async def connect_chat_histories(
         while True:
             try:
                 raw_data = await websocket.receive_json()
+            except WebSocketDisconnect:
+                # Re-raise disconnect to outer handler
+                raise
             except Exception:
+                # Only catch parsing/validation errors, not disconnects
                 continue
 
             event = raw_data.get("event")
             data = raw_data.get("data")
 
     except WebSocketDisconnect:
-        await manager.unsubscribe_local(sub_key, local_conn)
+        # Clean up with timeout protection
+        try:
+            await asyncio.wait_for(
+                manager.unsubscribe_local(sub_key, local_conn),
+                timeout=2.0
+            )
+        except Exception:
+            pass  # Cleanup failed, but don't block
     except Exception as exc:
         # logger.exception("Exception in websocket handler: %s", exc)
         # ensure cleanup
-
-        await manager.unsubscribe_local(sub_key, local_conn)
+        try:
+            await asyncio.wait_for(
+                manager.unsubscribe_local(sub_key, local_conn),
+                timeout=2.0
+            )
+        except Exception:
+            pass  # Cleanup failed, but don't block
         try:
             await websocket.close()
         except Exception:

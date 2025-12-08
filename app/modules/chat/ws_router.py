@@ -1,3 +1,5 @@
+import asyncio
+import traceback
 from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, WebSocketException
@@ -7,7 +9,13 @@ from app.common.utils import chat_history_ws_channel, websocket_error_wrapper
 from app.common.ws_manager import manager
 from app.core.dependencies import CurrentWSUser, SessionDep
 from app.modules.chat.service import ChatService
-from app.schemas.chat import ChatMessageRead, ChatRead
+from app.schemas.chat import (
+    ChatMessageRead,
+    ChatMessageUpdate,
+    ChatMessageWrite,
+    ChatRead,
+    PaginatedMessages,
+)
 
 if TYPE_CHECKING:
     from app.common.ws_manager import LocalConnection
@@ -23,11 +31,23 @@ async def connect_chat_histories(
     q: Optional[str] = None,
     page: Optional[int] = None,
 ):
-
     await websocket.accept()
     initial_data = await ChatService.list_chat(
         session, current_user, page or 1, PER_PAGE, q
     )
+
+    initial_data = [
+        {
+            **item,
+            "chat": item["chat"].model_dump(mode="json"),
+            "last_message": (
+                item["last_message"].model_dump(mode="json")
+                if item["last_message"]
+                else None
+            ),
+        }
+        for item in initial_data["items"]
+    ]
     await websocket.send_json({"event": "chat.list", "data": initial_data})
 
     sub_key = chat_history_ws_channel(current_user)
@@ -35,17 +55,44 @@ async def connect_chat_histories(
     local_conn = await manager.subscribe_local(sub_key, websocket)
     conns[sub_key] = local_conn
 
+    async def cleanup_all_connections():
+        """Clean up all connections with timeout protection and parallel execution"""
+        if not conns:
+            return
+
+        # Create cleanup tasks for all connections in parallel
+        cleanup_tasks = []
+        for key_, con in list(conns.items()):
+            try:
+                # Wrap each unsubscribe with a timeout
+                task = asyncio.wait_for(
+                    manager.unsubscribe_local(key_, con),
+                    timeout=2.0,  # 2 second timeout per connection
+                )
+                cleanup_tasks.append(task)
+            except Exception:
+                pass  # If task creation fails, continue with others
+
+        # Execute all cleanups in parallel with exception handling
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks, return_exceptions=True)
+
     try:
         while True:
             try:
                 raw_data = await websocket.receive_json()
+            except WebSocketDisconnect:
+                # Re-raise disconnect to outer handler
+                raise
             except Exception:
+                # Only catch parsing/validation errors, not disconnects
                 continue
 
             event = raw_data.get("event")
             data = raw_data.get("data")
 
             if event == "chat.subscribe":
+
                 if not isinstance(data, str):
                     raise WebSocketException(1002, "data must be a chat_id in string")
                 con = await manager.subscribe_local(data, websocket)
@@ -54,14 +101,15 @@ async def connect_chat_histories(
                 if not isinstance(data, str):
                     raise WebSocketException(1002, "data must be a chat_id in string")
                 await manager.unsubscribe_local(data, conns[data])
+                conns.pop(data, None)  # Remove from tracking
 
     except WebSocketDisconnect:
-        await manager.unsubscribe_local(sub_key, local_conn)
+        # Clean up all connections on disconnect
+        await cleanup_all_connections()
     except Exception as exc:
         # logger.exception("Exception in websocket handler: %s", exc)
-        # ensure cleanup
-        for key_, con in conns.items():
-            await manager.unsubscribe_local(key_, con)
+        # ensure cleanup on any other error
+        await cleanup_all_connections()
         try:
             await websocket.close()
         except Exception:
@@ -82,40 +130,70 @@ async def connect_to_chat(
 
     await websocket.accept()
     initial_data = await ChatService.get_initial_data(chat_id, session, current_user)
-    await websocket.send_json({"event": "chat.initial", "data": initial_data})
+
+    await websocket.send_json(
+        {
+            "event": "chat.initial",
+            "data": PaginatedMessages.model_validate(initial_data).model_dump(
+                mode="json"
+            ),
+        }
+    )
 
     local_conn = await manager.subscribe_local(chat_id, websocket)
-
+    sync_key = chat_history_ws_channel(current_user)
+    sync_conn = await manager.subscribe_local(sync_key, websocket)
     try:
         while True:
             try:
                 raw_data = await websocket.receive_json()
+            except WebSocketDisconnect:
+                # Re-raise disconnect to outer handler
+                raise
             except Exception:
+                # Only catch parsing/validation errors, not disconnects
                 continue
 
             event = raw_data.get("event")
             data = raw_data.get("data")
 
             if event == "chat.message.create":
+
                 resp = await websocket_error_wrapper(
-                    ChatService.create_message, session, current_user, data
+                    ChatService.create_message,
+                    session,
+                    current_user,
+                    ChatMessageWrite.model_validate(data),
                 )
+
                 model = ChatMessageRead.model_validate(resp)
+
                 await manager.publish(
                     chat_id,
-                    {"event": "chat.message.create", "data": model.model_dump()},
+                    {
+                        "event": "chat.message.create",
+                        "data": model.model_dump(mode="json"),
+                    },
                 )
+
             elif event == "chat.message.update":
                 resp = await websocket_error_wrapper(
-                    ChatService.update_chat, session, current_user, chat_id, data
+                    ChatService.update_message,
+                    session,
+                    current_user,
+                    data.get("message_id"),
+                    ChatMessageUpdate.model_validate(data, extra="ignore"),
                 )
                 model = ChatMessageRead.model_validate(resp)
                 await manager.publish(
                     chat_id,
-                    {"event": "chat.message.update", "data": model.model_dump()},
+                    {
+                        "event": "chat.message.update",
+                        "data": model.model_dump(mode="json"),
+                    },
                 )
             elif event == "chat.message.delete":
-                if isinstance(data, str):
+                if not isinstance(data, str):
                     raise WebSocketException(1002, "data must be a string")
                 resp = await websocket_error_wrapper(
                     ChatService.delete_message, session, current_user, data
@@ -123,7 +201,10 @@ async def connect_to_chat(
                 model = ChatMessageRead.model_validate(resp)
                 await manager.publish(
                     chat_id,
-                    {"event": "chat.message.delete", "data": model.model_dump()},
+                    {
+                        "event": "chat.message.delete",
+                        "data": model.model_dump(mode="json"),
+                    },
                 )
             elif event == "chat.update":
                 resp = await websocket_error_wrapper(
@@ -132,7 +213,11 @@ async def connect_to_chat(
                 model = ChatRead.model_validate(resp)
                 await manager.publish(
                     chat_id,
-                    {"event": "chat.update", "data": model.model_dump()},
+                    {"event": "chat.update", "data": model.model_dump(mode="json")},
+                )
+                await manager.publish(
+                    sync_key,
+                    {"event": "chat.update", "data": model.model_dump(mode="json")},
                 )
             elif event == "chat.reaction.create" or event == "chat.reaction.delete":
                 message_id = raw_data.get("message_id")
@@ -149,7 +234,10 @@ async def connect_to_chat(
                 model = ChatMessageRead.model_validate(resp)
                 await manager.publish(
                     chat_id,
-                    {"event": "chat.message.update", "data": model.model_dump()},
+                    {
+                        "event": "chat.message.update",
+                        "data": model.model_dump(mode="json"),
+                    },
                 )
             elif event == "chat.member.delete":
                 if isinstance(data, str):
@@ -159,26 +247,45 @@ async def connect_to_chat(
                 )
                 await manager.publish(
                     chat_id,
-                    {"event": "chat.member.delete", "data": model.model_dump()},
+                    {"event": "chat.member.delete", "data": model.model_dump_json()},
                 )
+            # END OF EVENTS
 
-            await manager.publish(
-                chat_id,
+            stat_resp = (
                 {
                     "event": "chat.stat",
-                    "data": await ChatService.fetch_one_unread_stats(
-                        session, chat_id, current_user.id
-                    ),
-                    "chat_id": chat_id,
+                    "data": {
+                        **await ChatService.fetch_one_unread_stats(
+                            session, chat_id, current_user.id
+                        ),
+                        "chat_id": chat_id,
+                    },
                 },
             )
 
+            await manager.publish(chat_id, stat_resp)
+            await manager.publish(sync_key, stat_resp)
+
     except WebSocketDisconnect:
-        await manager.unsubscribe_local(chat_id, local_conn)
+        # Clean up with timeout protection
+        try:
+            await asyncio.wait_for(
+                manager.unsubscribe_local(chat_id, local_conn), timeout=2.0
+            )
+        except Exception:
+            pass  # Cleanup failed, but don't block
     except Exception as exc:
         # logger.exception("Exception in websocket handler: %s", exc)
         # ensure cleanup
-        await manager.unsubscribe_local(chat_id, local_conn)
+
+        print("-- catch all error -----", exc)
+        print(traceback.format_exc())
+        try:
+            await asyncio.wait_for(
+                manager.unsubscribe_local(chat_id, local_conn), timeout=2.0
+            )
+        except Exception:
+            pass  # Cleanup failed, but don't block
         try:
             await websocket.close()
         except Exception:

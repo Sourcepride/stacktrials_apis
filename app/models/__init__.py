@@ -19,3 +19,4 @@ from app.models.courses_model import (
 from app.models.chat_model import Chat, ChatInvite, ChatMember, Message, MessageReaction
 from app.models.comments_model import Comment, Rating
 from app.models.annotation_model import DocumentAnnotation, DocumentChat
+from app.models.notification_model import Notification

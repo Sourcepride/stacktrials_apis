@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 
+from sqlalchemy import DateTime
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlmodel import Column, Field, Relationship, SQLModel
 
@@ -32,7 +33,13 @@ class NotificationBase(AppSQLModel):
     message: str = Field(max_length=500)
 
     is_read: bool = Field(default=False, index=True)
-    read_at: Optional[datetime] = Field(default=None)
+    read_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            comment="Stored in UTC. Use AT TIME ZONE 'UTC' during migration.",
+        ),
+    )
 
     # Optional references to related objects
     # Example: course, chat, message, comment, rating...

@@ -30,7 +30,7 @@ async def list_notifications(
     )
 
 
-@router.get("/mark-al")
+@router.get("/mark-all-read")
 async def mark_all(
     session: SessionDep,
     current_user: CurrentActiveUser,

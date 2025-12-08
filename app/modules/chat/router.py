@@ -3,16 +3,31 @@ from typing import Annotated, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Body, Query
 
+from app.common.constants import PER_PAGE
 from app.common.utils import chat_history_ws_channel
 from app.common.ws_manager import manager
 from app.core.dependencies import CurrentActiveUser, SessionDep
 from app.modules.chat.service import ChatService
-from app.schemas.chat import ChatInviteWrite, ChatWrite
+from app.schemas.base import OkModel
+from app.schemas.chat import (
+    ChatInviteBulkWrite,
+    ChatInviteEmailWrite,
+    ChatInviteRead,
+    ChatInviteWrite,
+    ChatMemberRead,
+    ChatRead,
+    ChatWrite,
+    PaginatedChatInviteRead,
+    PaginatedChatMemberRead,
+    PaginatedChatRead,
+    PaginatedChatReadWithUnReadCount,
+    PaginatedMessages,
+)
 
 router = APIRouter()
 
 
-@router.post("/")
+@router.post("/", response_model=ChatRead)
 async def create_chat(
     session: SessionDep,
     current_user: CurrentActiveUser,
@@ -25,24 +40,44 @@ async def create_chat(
     return resp
 
 
-@router.get("/public/all")
+@router.get("/", response_model=PaginatedChatReadWithUnReadCount)
+async def list_chats(
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+    page: int = 1,
+    q: Optional[str] = None,
+):
+    return await ChatService.list_chat(session, current_user, page, PER_PAGE, q)
+
+
+@router.get("/public/all", response_model=PaginatedChatRead)
 async def list_public_chats(
     session: SessionDep, current_user: CurrentActiveUser, q: Optional[str] = None
 ):
     return await ChatService.list_all_public_chat(q, session, current_user)
 
 
-@router.post("/invite")
+@router.post("/invite", response_model=OkModel)
 async def create_invite(
     session: SessionDep,
     current_user: CurrentActiveUser,
     bgTask: BackgroundTasks,
-    data: ChatInviteWrite,
+    data: Annotated[ChatInviteBulkWrite, Body()],
 ):
     return await ChatService.create_invite(session, current_user, bgTask, data)
 
 
-@router.patch("/invite/accept/{token}")
+@router.post("/invite/email", response_model=ChatInviteRead)
+async def create_invite_by_email(
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+    bgTask: BackgroundTasks,
+    data: Annotated[ChatInviteEmailWrite, Body()],
+):
+    return await ChatService.create_invite_by_email(session, current_user, bgTask, data)
+
+
+@router.patch("/invite/accept/{token}", response_model=ChatMemberRead)
 async def accept_invite(
     token: str, session: SessionDep, current_user: CurrentActiveUser
 ):
@@ -52,7 +87,7 @@ async def accept_invite(
     return resp
 
 
-@router.patch("/{chat_id}/join")
+@router.patch("/{chat_id}/join", response_model=ChatMemberRead)
 async def join_public_chat(
     chat_id: str, session: SessionDep, current_user: CurrentActiveUser
 ):
@@ -66,7 +101,7 @@ async def join_public_chat(
     return resp
 
 
-@router.get("/{chat_id}/messages")
+@router.get("/{chat_id}/messages", response_model=PaginatedMessages)
 async def list_messages(
     chat_id: str,
     session: SessionDep,
@@ -90,21 +125,80 @@ async def list_messages(
     )
 
 
-@router.patch("/{chat_id}/make-admin/{member_id}")
+@router.get("/{chat_id}/members", response_model=PaginatedChatMemberRead)
+async def list_members(
+    chat_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+    page: int = 1,
+):
+    return await ChatService.list_members(session, current_user, chat_id, page)
+
+
+@router.patch("/{chat_id}/mark-as-read/{message_id}", response_model=OkModel)
+async def mark_as_read(
+    chat_id: str,
+    message_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    resp = await ChatService.mark_as_read(session, chat_id, message_id, current_user)
+    stat_resp = (
+        {
+            "event": "chat.stat",
+            "data": {
+                **await ChatService.fetch_one_unread_stats(
+                    session, chat_id, current_user.id
+                ),
+                "chat_id": chat_id,
+            },
+        },
+    )
+    sync_key = chat_history_ws_channel(current_user)
+    await manager.publish(chat_id, stat_resp)
+    await manager.publish(sync_key, stat_resp)
+    return resp
+
+
+@router.patch("/{chat_id}/mark-all-as-read", response_model=OkModel)
+async def mark_all_as_read(
+    chat_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    resp = await ChatService.mark_all_as_read(session, chat_id, current_user)
+    stat_resp = (
+        {
+            "event": "chat.stat",
+            "data": {
+                **await ChatService.fetch_one_unread_stats(
+                    session, chat_id, current_user.id
+                ),
+                "chat_id": chat_id,
+            },
+        },
+    )
+    sync_key = chat_history_ws_channel(current_user)
+    await manager.publish(chat_id, stat_resp)
+    await manager.publish(sync_key, stat_resp)
+    return resp
+
+
+@router.patch("/{chat_id}/make-admin/{member_id}", response_model=ChatMemberRead)
 async def make_admin(
     chat_id: str, session: SessionDep, current_user: CurrentActiveUser, member_id: str
 ):
     return await ChatService.make_admin(session, current_user, chat_id, member_id)
 
 
-@router.patch("/{chat_id}/remove-admin/{member_id}")
+@router.patch("/{chat_id}/remove-admin/{member_id}", response_model=ChatMemberRead)
 async def remove_admin(
     chat_id: str, session: SessionDep, current_user: CurrentActiveUser, member_id: str
 ):
     return await ChatService.remove_admin(session, current_user, chat_id, member_id)
 
 
-@router.patch("/{course_id}/add-directly/{user_id}")
+@router.patch("/{course_id}/add-directly/{user_id}", response_model=ChatRead)
 async def add_directly(
     course_id: str, user_id: str, session: SessionDep, current_user: CurrentActiveUser
 ):
