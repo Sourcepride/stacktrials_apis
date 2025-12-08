@@ -141,6 +141,8 @@ async def connect_to_chat(
     )
 
     local_conn = await manager.subscribe_local(chat_id, websocket)
+    sync_key = chat_history_ws_channel(current_user)
+    sync_conn = await manager.subscribe_local(sync_key, websocket)
     try:
         while True:
             try:
@@ -191,7 +193,7 @@ async def connect_to_chat(
                     },
                 )
             elif event == "chat.message.delete":
-                if isinstance(data, str):
+                if not isinstance(data, str):
                     raise WebSocketException(1002, "data must be a string")
                 resp = await websocket_error_wrapper(
                     ChatService.delete_message, session, current_user, data
@@ -211,6 +213,10 @@ async def connect_to_chat(
                 model = ChatRead.model_validate(resp)
                 await manager.publish(
                     chat_id,
+                    {"event": "chat.update", "data": model.model_dump(mode="json")},
+                )
+                await manager.publish(
+                    sync_key,
                     {"event": "chat.update", "data": model.model_dump(mode="json")},
                 )
             elif event == "chat.reaction.create" or event == "chat.reaction.delete":
@@ -243,9 +249,9 @@ async def connect_to_chat(
                     chat_id,
                     {"event": "chat.member.delete", "data": model.model_dump_json()},
                 )
+            # END OF EVENTS
 
-            await manager.publish(
-                chat_id,
+            stat_resp = (
                 {
                     "event": "chat.stat",
                     "data": {
@@ -256,6 +262,9 @@ async def connect_to_chat(
                     },
                 },
             )
+
+            await manager.publish(chat_id, stat_resp)
+            await manager.publish(sync_key, stat_resp)
 
     except WebSocketDisconnect:
         # Clean up with timeout protection

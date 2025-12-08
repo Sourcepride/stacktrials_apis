@@ -135,6 +135,55 @@ async def list_members(
     return await ChatService.list_members(session, current_user, chat_id, page)
 
 
+@router.patch("/{chat_id}/mark-as-read/{message_id}", response_model=OkModel)
+async def mark_as_read(
+    chat_id: str,
+    message_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    resp = await ChatService.mark_as_read(session, chat_id, message_id, current_user)
+    stat_resp = (
+        {
+            "event": "chat.stat",
+            "data": {
+                **await ChatService.fetch_one_unread_stats(
+                    session, chat_id, current_user.id
+                ),
+                "chat_id": chat_id,
+            },
+        },
+    )
+    sync_key = chat_history_ws_channel(current_user)
+    await manager.publish(chat_id, stat_resp)
+    await manager.publish(sync_key, stat_resp)
+    return resp
+
+
+@router.patch("/{chat_id}/mark-all-as-read", response_model=OkModel)
+async def mark_all_as_read(
+    chat_id: str,
+    session: SessionDep,
+    current_user: CurrentActiveUser,
+):
+    resp = await ChatService.mark_all_as_read(session, chat_id, current_user)
+    stat_resp = (
+        {
+            "event": "chat.stat",
+            "data": {
+                **await ChatService.fetch_one_unread_stats(
+                    session, chat_id, current_user.id
+                ),
+                "chat_id": chat_id,
+            },
+        },
+    )
+    sync_key = chat_history_ws_channel(current_user)
+    await manager.publish(chat_id, stat_resp)
+    await manager.publish(sync_key, stat_resp)
+    return resp
+
+
 @router.patch("/{chat_id}/make-admin/{member_id}", response_model=ChatMemberRead)
 async def make_admin(
     chat_id: str, session: SessionDep, current_user: CurrentActiveUser, member_id: str

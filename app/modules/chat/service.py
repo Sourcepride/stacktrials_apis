@@ -5,7 +5,7 @@ from typing import Any, Optional
 
 from fastapi import BackgroundTasks, HTTPException, WebSocketException
 from sqlalchemy.orm import selectinload
-from sqlmodel import and_, col, desc, func, or_, select
+from sqlmodel import and_, asc, col, desc, func, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.common.constants import BASE_URL, PER_PAGE
@@ -71,7 +71,7 @@ class ChatService:
         )
         query = (
             select(Message)
-            .where(Message.chat_id == chat_id, Message.is_deleted == False)
+            .where(Message.chat_id == chat_id)
             .options(
                 selectinload(Message.sender)
                 .selectinload(ChatMember.account)
@@ -108,7 +108,7 @@ class ChatService:
         if q:
             query = query.where(col(Message.content).ilike(f"%{q}%"))
 
-        query = query.order_by(Message.created_at).limit(limit)
+        query = query.order_by(desc(Message.created_at)).limit(limit)
 
         messages = (await session.exec(query)).all()
 
@@ -1184,6 +1184,95 @@ class ChatService:
         await session.refresh(member)
 
         return member
+
+    @staticmethod
+    async def mark_as_read(
+        session: AsyncSession,
+        chat_id: str,
+        message_id: str,
+        current_user: Account,
+    ):
+        """
+        Mark a specific message as read (set last read message).
+        - validate user is member
+        - validate message exists and belongs to chat
+        - update ChatMember.last_read_message_id
+        """
+        # Verify chat exists and user is a member
+        await ChatService.get_chat_and_membership_or_raise(
+            chat_id, str(current_user.id), session
+        )
+
+        # Get member
+        member = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat_id)
+                .where(ChatMember.account_id == current_user.id)
+            )
+        ).first()
+        if not member:
+            raise HTTPException(403, "You are not a member of this chat")
+
+        # message exists & belongs to chat
+        msg = await session.get(Message, uuid.UUID(message_id))
+        if not msg or str(msg.chat_id) != chat_id:
+            raise HTTPException(404, "Message not found in this chat")
+
+        # update read pointer
+        member.last_read_message_id = msg.id
+
+        session.add(member)
+        await session.commit()
+        return {"ok": True}
+
+    @staticmethod
+    async def mark_all_as_read(
+        session: AsyncSession,
+        chat_id: str,
+        current_user: Account,
+    ):
+        """
+        Mark all messages as read in a chat.
+        - Finds the most recent message in the chat
+        - Sets it as the last read message for the user
+        """
+        # Verify chat exists and user is a member
+        await ChatService.get_chat_and_membership_or_raise(
+            chat_id, str(current_user.id), session
+        )
+
+        # Get member
+        member = (
+            await session.exec(
+                select(ChatMember)
+                .where(ChatMember.chat_id == chat_id)
+                .where(ChatMember.account_id == current_user.id)
+            )
+        ).first()
+        if not member:
+            raise HTTPException(403, "You are not a member of this chat")
+
+        # Get the most recent message in the chat
+        latest_message = (
+            await session.exec(
+                select(Message)
+                .where(Message.chat_id == chat_id)
+                .order_by(desc(Message.created_at))
+                .limit(1)
+            )
+        ).first()
+
+        if not latest_message:
+            # No messages in chat, nothing to mark as read
+            return {"ok": True}
+
+        # update read pointer to latest message
+        member.last_read_message_id = latest_message.id
+
+        session.add(member)
+        await session.commit()
+        return {"ok": True}
 
     @staticmethod
     async def set_last_message_read(
